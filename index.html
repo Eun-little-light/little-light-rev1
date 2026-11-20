@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>작은 빛</title>
+  <style>
+    :root {
+      --bg: #040c13;
+      --bg-raise: #08151f;
+      --ink: #e9e6df;
+      --ink-2: #a9a6a0;
+      --ink-3: #5d6066;
+      --line: rgba(233, 230, 223, 0.08);
+      --line-2: rgba(233, 230, 223, 0.16);
+      --ice: #6fd8ff;
+      --ice-rgb: 111, 216, 255;
+      --amber: #ffb54a;
+      --amber-rgb: 255, 181, 74;
+      --red: #ff5b4f;
+      --red-rgb: 255, 91, 79;
+      --accent: var(--ice);
+      --accent-rgb: var(--ice-rgb);
+      --mono: "SF Mono", ui-monospace, Menlo, monospace;
+      --sans: -apple-system, "SF Pro Text", "Apple SD Gothic Neo", sans-serif;
+      --display: -apple-system, "SF Pro Display", "Apple SD Gothic Neo", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--ink);
+      font-family: var(--sans); user-select: none; cursor: default;
+    }
+
+    /* 비네팅 + 미세 노이즈 */
+    .vignette {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 70% 65% at 50% 46%, rgba(20, 70, 110, 0.35), transparent 75%),
+        radial-gradient(ellipse 60% 55% at 50% 46%, rgba(var(--accent-rgb), 0.06), transparent 70%),
+        radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.6) 100%);
+      transition: background 0.8s ease;
+    }
+
+    .shell {
+      position: relative; z-index: 1;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) 1fr 236px;
+      grid-template-rows: 44px 1fr auto;
+    }
+
+    /* ── 상단 라벨 줄 (macOS 타이틀바 영역, 클릭 없음) ── */
+    .titlebar {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 22px 0 88px;
+      font: 500 10px/1 var(--mono); letter-spacing: 2.4px; color: var(--ink-3);
+      border-bottom: 1px solid var(--line);
+      pointer-events: none;
+    }
+    .titlebar .mark { color: var(--ink-2); }
+    .titlebar .mark b { color: var(--ink); font-weight: 600; }
+    .link-chip { display: flex; align-items: center; gap: 8px; }
+    .link-chip i {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3);
+      transition: background 0.4s, box-shadow 0.4s;
+    }
+    .link-chip[data-link="online"] i { background: var(--ice); box-shadow: 0 0 8px var(--ice); }
+    .link-chip[data-link="online"] span { color: var(--ink); }
+
+    /* ── 좌측 전송 로그 ── */
+    .log-col {
+      grid-column: 1; grid-row: 2 / 4;
+      border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .col-label {
+      padding: 18px 22px 10px;
+      font: 500 10px/1 var(--mono); letter-spacing: 2.4px; color: var(--ink-3);
+      display: flex; justify-content: space-between;
+    }
+    .log {
+      flex: 1; overflow-y: auto; padding: 6px 22px 22px;
+      display: flex; flex-direction: column; gap: 22px;
+      user-select: text; cursor: auto;
+      mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+    }
+    .log::-webkit-scrollbar { width: 0; }
+    .entry { animation: rise 0.35s cubic-bezier(.2,.7,.2,1); }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .entry-head {
+      display: flex; gap: 10px; align-items: baseline;
+      font: 500 9.5px/1 var(--mono); letter-spacing: 2px; color: var(--ink-3);
+      margin-bottom: 8px;
+    }
+    .entry-head .who { color: var(--ink-2); }
+    .entry.ghost .entry-head .who { color: var(--accent); transition: color 0.5s; }
+    .entry-body {
+      font-size: 13.5px; line-height: 1.7; color: var(--ink-2);
+      word-break: keep-all; white-space: pre-wrap;
+    }
+    .entry.ghost .entry-body {
+      color: var(--ink);
+      padding-left: 12px;
+      border-left: 1px solid rgba(var(--accent-rgb), 0.5);
+      transition: border-color 0.5s;
+    }
+    .entry.pending .entry-body::after {
+      content: "▍"; color: var(--accent); animation: blink 0.9s steps(1) infinite; margin-left: 2px;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── 중앙 코어 ── */
+    .stage { grid-column: 2; grid-row: 2; position: relative; min-height: 0; }
+    #core { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .stage-caption {
+      position: absolute; left: 0; right: 0; bottom: 26px;
+      text-align: center; pointer-events: none;
+    }
+    .stage-caption .state {
+      font: 300 26px/1 var(--display); letter-spacing: 14px; color: var(--ink);
+      padding-left: 14px; /* letter-spacing 보정 */
+    }
+    .stage-caption .sub {
+      margin-top: 10px; font: 500 9.5px/1 var(--mono); letter-spacing: 3px; color: var(--ink-3);
+    }
+
+    /* ── 우측 계기판 ── */
+    .readouts {
+      grid-column: 3; grid-row: 2 / 4;
+      border-left: 1px solid var(--line);
+      padding: 18px 20px 20px;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .ro .k { font: 500 9.5px/1 var(--mono); letter-spacing: 2.2px; color: var(--ink-3); margin-bottom: 7px; }
+    .ro .v { font: 400 15px/1.2 var(--mono); color: var(--ink); letter-spacing: 0.5px; }
+    .ro .v small { font-size: 10px; color: var(--ink-3); margin-left: 4px; }
+    #pulse { width: 100%; height: 46px; display: block; }
+
+    .states { display: flex; flex-direction: column; gap: 2px; }
+    .states button {
+      all: unset; cursor: pointer;
+      display: flex; align-items: center; gap: 10px;
+      padding: 5px 0;
+      font: 500 10px/1 var(--mono); letter-spacing: 2.2px; color: var(--ink-3);
+      transition: color 0.2s;
+    }
+    .states button::before {
+      content: ""; width: 14px; height: 1px; background: currentColor; transition: width 0.3s, background 0.3s;
+    }
+    .states button:hover { color: var(--ink-2); }
+    .states button.on { color: var(--ink); }
+    .states button.on::before { width: 28px; background: var(--accent); }
+
+    .spacer { flex: 1; }
+    .ghost-btn {
+      all: unset; cursor: pointer; text-align: center;
+      padding: 10px 0; border: 1px solid var(--line-2); border-radius: 2px;
+      font: 500 10px/1 var(--mono); letter-spacing: 2.4px; color: var(--ink-2);
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+    }
+    .ghost-btn:hover { color: var(--ink); border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.05); }
+    .hint { font: 500 9px/1.7 var(--mono); letter-spacing: 1.5px; color: var(--ink-3); }
+
+    /* ── 하단 명령줄 ── */
+    .command {
+      grid-column: 2; grid-row: 3;
+      padding: 0 32px 26px;
+    }
+    .cmd-line {
+      display: flex; align-items: center; gap: 14px;
+      border-bottom: 1px solid var(--line-2);
+      padding: 0 2px 10px;
+      transition: border-color 0.3s;
+    }
+    .cmd-line:focus-within { border-color: rgba(var(--accent-rgb), 0.7); }
+    .cmd-line .caret { font: 400 18px/1 var(--mono); color: var(--accent); transition: color 0.5s; }
+    .cmd-line input {
+      flex: 1; background: none; border: 0; outline: none;
+      color: var(--ink); font: 400 16px/1.4 var(--sans); letter-spacing: 0.2px;
+      user-select: text;
+    }
+    .cmd-line input::placeholder { color: var(--ink-3); }
+    .cmd-line kbd { font: 500 9.5px/1 var(--mono); letter-spacing: 2px; color: var(--ink-3); }
+
+    /* ── 설정 시트 ── */
+    .sheet-wrap {
+      position: fixed; inset: 0; z-index: 10;
+      background: rgba(3, 4, 5, 0.72);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      display: none; align-items: center; justify-content: center;
+    }
+    .sheet-wrap.open { display: flex; animation: fade 0.2s ease; }
+    @keyframes fade { from { opacity: 0; } }
+    .sheet {
+      width: min(460px, calc(100vw - 32px));
+      background: var(--bg-raise); border: 1px solid var(--line-2); border-radius: 3px;
+      padding: 26px 26px 22px;
+    }
+    .sheet h2 { font: 300 20px/1 var(--display); letter-spacing: 8px; margin-bottom: 6px; }
+    .sheet .lead { font-size: 12px; color: var(--ink-3); margin-bottom: 22px; line-height: 1.6; }
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font: 500 9.5px/1 var(--mono); letter-spacing: 2.2px; color: var(--ink-3); margin-bottom: 8px; }
+    .field input, .field select {
+      width: 100%; background: transparent; color: var(--ink);
+      border: 0; border-bottom: 1px solid var(--line-2); padding: 6px 0 8px;
+      font: 400 14px/1.3 var(--mono); outline: none; user-select: text;
+      -webkit-appearance: none; appearance: none; border-radius: 0;
+    }
+    .field select { cursor: pointer; }
+    .field select option { background: #111; }
+    .field input:focus, .field select:focus { border-color: var(--accent); }
+    .field .note { margin-top: 7px; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+    .seg { display: flex; gap: 0; border: 1px solid var(--line-2); border-radius: 2px; }
+    .seg button {
+      all: unset; cursor: pointer; flex: 1; text-align: center; padding: 9px 0;
+      font: 500 10px/1 var(--mono); letter-spacing: 2px; color: var(--ink-3);
+    }
+    .seg button + button { border-left: 1px solid var(--line-2); }
+    .seg button.on { color: var(--bg); background: var(--ink); }
+    .tool-line { font: 500 11px/1.5 var(--mono); color: var(--ink-3); margin-top: -12px; white-space: pre-wrap; word-break: break-all; }
+    .tool-line.run { color: rgba(var(--accent-rgb), 0.85); }
+    .confirm-card {
+      border: 1px solid rgba(var(--accent-rgb), 0.45); border-radius: 3px; padding: 12px 14px;
+      background: rgba(var(--accent-rgb), 0.05); animation: rise 0.3s ease;
+    }
+    .confirm-card .cc-title { font-size: 12.5px; color: var(--ink); margin-bottom: 6px; }
+    .confirm-card .cc-body { font-size: 12px; color: var(--ink-2); white-space: pre-wrap; line-height: 1.6; margin-bottom: 10px; }
+    .confirm-card .cc-row { display: flex; gap: 8px; }
+    .confirm-card .cc-row .ghost-btn { flex: 1; padding: 8px 0; }
+    .confirm-card.ok, .confirm-card.no { opacity: 0.55; }
+    .confirm-card.ok .cc-row, .confirm-card.no .cc-row { display: none; }
+    .test-status { min-height: 18px; margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+    .test-status.ok { color: var(--ice); }
+    .test-status.bad { color: var(--red); }
+    .sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .sheet-actions .ghost-btn { flex: 1; }
+    .sheet-actions .primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+    .sheet-actions .primary:hover { background: #fff; color: var(--bg); }
+
+    /* 한글 라벨: 넓은 자간은 한글에서 어색하므로 줄이고 한글 서체 우선 */
+    .titlebar, .col-label, .entry-head, .ro .k, .states button, .ghost-btn, .hint,
+    .stage-caption .sub, .field label, .seg button, .cmd-line kbd {
+      font-family: "Apple SD Gothic Neo", var(--mono); letter-spacing: 1.2px;
+    }
+    .ro .k, .col-label { font-size: 10.5px; }
+    .stage-caption .state { font-weight: 300; letter-spacing: 18px; padding-left: 18px; }
+    .sheet h2 { letter-spacing: 4px; }
+    .ro .v { font-family: var(--mono), "Apple SD Gothic Neo"; }
+
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 300px 1fr; }
+      .readouts { display: none; }
+    }
+
+    /* ── 미니 고스트 오버레이 모드 (⌘ G) ── */
+    .mini-speech, .mini-confirm, .mini-expand { display: none; }
+    html.mini, body.mini {
+      background: transparent !important;
+    }
+    body.mini .vignette,
+    body.mini .titlebar,
+    body.mini .log-col,
+    body.mini .readouts,
+    body.mini .stage-caption,
+    body.mini .cmd-line kbd {
+      display: none !important;
+    }
+    body.mini .shell {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr auto auto auto;
+    }
+    body.mini .stage {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    body.mini .mini-confirm {
+      display: block;
+      grid-column: 1;
+      grid-row: 2;
+      margin: 0 14px 8px;
+    }
+    body.mini .mini-confirm:empty { display: none; }
+    body.mini .mini-confirm .confirm-card {
+      background: rgba(4, 12, 19, 0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    body.mini .mini-speech {
+      display: block;
+      grid-column: 1;
+      grid-row: 3;
+      margin: 0 14px 8px;
+      padding: 9px 13px;
+      background: rgba(4, 12, 19, 0.78);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(var(--accent-rgb), 0.35);
+      border-radius: 10px;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: var(--ink);
+      max-height: 84px;
+      overflow-y: auto;
+      word-break: keep-all;
+      user-select: text;
+    }
+    body.mini .mini-speech:empty { display: none; }
+    body.mini .mini-speech::-webkit-scrollbar { width: 0; }
+    body.mini .command {
+      grid-column: 1;
+      grid-row: 4;
+      padding: 0 14px 14px;
+    }
+    body.mini .cmd-line {
+      background: rgba(4, 12, 19, 0.78);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(var(--accent-rgb), 0.3);
+      border-radius: 8px;
+      padding: 7px 12px;
+    }
+    body.mini .cmd-line input { font-size: 13px; }
+    body.mini .mini-expand {
+      all: unset;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      position: fixed;
+      top: 10px;
+      right: 12px;
+      z-index: 6;
+      padding: 5px 9px;
+      border-radius: 4px;
+      background: rgba(4, 12, 19, 0.68);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--line-2);
+      font: 500 10px/1 "Apple SD Gothic Neo", var(--mono);
+      letter-spacing: 1px;
+      color: var(--ink-2);
+      transition: color 0.2s, border-color 0.2s;
+    }
+    body.mini .mini-expand:hover { color: var(--ink); border-color: var(--accent); }
+  </style>
+</head>
+<body data-state="IDLE">
+  <div class="vignette"></div>
+
+  <div class="shell">
+    <header class="titlebar">
+      <span class="mark"><b>작은 빛</b>&nbsp;&nbsp;·&nbsp;&nbsp;고스트 동반 프레임</span>
+      <span class="link-chip" id="linkChip" data-link="local"><i></i><span id="linkText">로컬</span></span>
+    </header>
+
+    <section class="log-col">
+      <div class="col-label"><span>교신 기록</span><span id="turnCount">00</span></div>
+      <div class="log" id="log"></div>
+    </section>
+
+    <main class="stage">
+      <canvas id="core"></canvas>
+    </main>
+
+    <aside class="readouts">
+      <div class="ro"><div class="k">링크</div><div class="v" id="roLink">로컬</div></div>
+      <div class="ro"><div class="k">엔진</div><div class="v" id="roModel">내장</div></div>
+      <div class="ro"><div class="k">첫 응답 지연</div><div class="v" id="roLatency">—</div></div>
+      <div class="ro"><div class="k">현재 시각</div><div class="v" id="roClock">--:--</div></div>
+      <div class="ro"><div class="k">코어 리듬</div><canvas id="pulse"></canvas></div>
+      <div class="ro">
+        <div class="k">상태 전환</div>
+        <div class="states" id="states">
+          <button data-state="IDLE" class="on">대기</button>
+          <button data-state="LISTEN">수신</button>
+          <button data-state="THINK">분석</button>
+          <button data-state="SPEAK">송신</button>
+          <button data-state="ALERT">경고</button>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="ghost-btn" id="openConfig">링크 설정</button>
+      <div class="hint">⌘ ,&nbsp;&nbsp;링크 설정<br>⌘ G&nbsp;&nbsp;미니 오버레이<br>⌘ ⏎&nbsp;&nbsp;전체화면<br>⌘ K&nbsp;&nbsp;기록 지우기</div>
+    </aside>
+
+    <button type="button" class="mini-expand" id="miniExpand" title="일반 창으로 복귀 (⌘G)">확장</button>
+    <div class="mini-confirm" id="miniConfirm"></div>
+    <div class="mini-speech" id="miniSpeech"></div>
+
+    <footer class="command">
+      <form class="cmd-line" id="cmdForm" autocomplete="off">
+        <span class="caret">›</span>
+        <input id="cmdInput" type="text" placeholder="말을 걸어 보세요" spellcheck="false" />
+        <kbd>⏎ 전송</kbd>
+      </form>
+    </footer>
+  </div>
+
+  <!-- 설정 시트 -->
+  <div class="sheet-wrap" id="sheet">
+    <div class="sheet" role="dialog" aria-label="링크 설정">
+      <h2>링크 설정</h2>
+      <p class="lead">이 Mac에서 돌아가는 로컬 LLM(Ollama)에 연결해요. 인터넷도 API 요금도 필요 없어요. 연결이 안 되면 내장 응답으로 대답해요.</p>
+      <div class="field">
+        <label for="cfgBase">서버 주소</label>
+        <input id="cfgBase" type="text" placeholder="http://localhost:11434" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label for="cfgModel">모델</label>
+        <select id="cfgModel"></select>
+        <div class="note">목록이 비어 있으면 '연결 확인'을 눌러 설치된 모델을 불러오세요.</div>
+      </div>
+      <div class="field">
+        <label>대화 엔진</label>
+        <div class="seg" id="cfgMode">
+          <button type="button" data-mode="AUTO" class="on">로컬 LLM</button>
+          <button type="button" data-mode="LOCAL">내장 응답만</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Mac 제어</label>
+        <div class="seg" id="cfgTools">
+          <button type="button" data-tools="on" class="on">허용</button>
+          <button type="button" data-tools="off">끔</button>
+        </div>
+        <div class="note">앱·웹 열기, 시스템 정보, 볼륨·밝기·다크 모드, 메모·미리 알림·타이머. 메모와 미리 알림은 실행 전에 확인을 받아요.</div>
+      </div>
+      <div class="test-status" id="cfgStatus"></div>
+      <div class="sheet-actions">
+        <button class="ghost-btn" id="cfgTest">연결 확인</button>
+        <button class="ghost-btn" id="cfgCancel">취소</button>
+        <button class="ghost-btn primary" id="cfgSave">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lore.js"></script>
+  <script>
+  "use strict";
+
+  /* ==========================================================================
+   * 0. 네이티브 브릿지 (macOS 앱: Swift가 HTTP·Mac 제어 담당 / 브라우저: fetch 폴백)
+   * ======================================================================== */
+  const Native = {
+    get available() {
+      return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native);
+    },
+    post(msg) { if (this.available) window.webkit.messageHandlers.native.postMessage(msg); },
+    _id: 0,
+    _pending: new Map(),
+    call(cmd, payload = {}, onLine = null) {
+      return new Promise((resolve, reject) => {
+        const id = ++this._id;
+        this._pending.set(id, { resolve, reject, onLine });
+        this.post(Object.assign({ cmd, id }, payload));
+      });
+    }
+  };
+  window.__nativeReply = (id, ok, data) => {
+    const p = Native._pending.get(id);
+    if (!p) return;
+    Native._pending.delete(id);
+    ok ? p.resolve(data) : p.reject(new Error(String(data)));
+  };
+  window.__nativeLine = (id, line) => {
+    const p = Native._pending.get(id);
+    if (p && p.onLine) p.onLine(line);
+  };
+
+  const Config = { base: "http://localhost:11434", model: "qwen3:8b", mode: "AUTO", tools: true, shell: "classic" };
+  const LS_KEY = "ghostcore.local.config";
+
+  function loadBrowserConfig() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) Object.assign(Config, JSON.parse(raw));
+    } catch (_) {}
+  }
+  function saveConfig() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(Config)); } catch (_) {}
+    if (Native.available) {
+      Native.post({ cmd: "saveConfig", base: Config.base, model: Config.model, mode: Config.mode, tools: Config.tools, shell: Config.shell });
+    }
+  }
+  // Swift 쪽에서 호출
+  window.__applyNativeConfig = function (cfg) {
+    if (cfg && typeof cfg === "object") {
+      if (typeof cfg.base === "string" && cfg.base) Config.base = cfg.base;
+      if (typeof cfg.model === "string" && cfg.model) Config.model = cfg.model;
+      if (typeof cfg.mode === "string" && cfg.mode) Config.mode = cfg.mode;
+      if (typeof cfg.tools === "boolean") Config.tools = cfg.tools;
+      if (typeof cfg.shell === "string" && cfg.shell) Config.shell = cfg.shell;
+    }
+    probeLLM();
+  };
+
+  /* ==========================================================================
+   * 1. 내장 응답 엔진 (오프라인용, 모든 대사는 이 앱을 위해 새로 작성)
+   * ======================================================================== */
+  function pickLoreOffline(text) {
+    const q = String(text || "").toLowerCase();
+    let best = null, bestScore = 0;
+    for (const sec of (window.LORE_DB ? window.LORE_DB.sections : [])) {
+      let sc = 0;
+      for (const k of sec.keys) if (k.length >= 2 && q.includes(k.toLowerCase())) sc += k.length >= 3 ? 2 : 1;
+      if (sc > bestScore) { best = sec; bestScore = sc; }
+    }
+    return bestScore >= 2 ? best : null;
+  }
+
+  const Resident = (function () {
+    const memory = { name: null, lastLine: {} };
+
+    function addr() { return memory.name ? memory.name : "수호자"; }
+
+    function pick(key, list) {
+      let line;
+      do { line = list[Math.floor(Math.random() * list.length)]; }
+      while (list.length > 1 && line === memory.lastLine[key]);
+      memory.lastLine[key] = line;
+      return line.replaceAll("{you}", addr());
+    }
+
+    function timeGreeting() {
+      const h = new Date().getHours();
+      if (h < 5) return [
+        "{you}, 아직 안 잤어요? 저야 잠이 없지만, 수호자는 자야죠.",
+        "새벽엔 신호가 유난히 깨끗해요. 둘만 깨어 있는 기분이네요. 무슨 일이에요?"
+      ];
+      if (h < 12) return [
+        "좋은 아침이에요, {you}! 밤새 제가 지켜봤는데 별일 없었어요.",
+        "일어났어요? 먼저 깨서 기다리고 있었어요. 오늘 뭐부터 할까요?"
+      ];
+      if (h < 18) return [
+        "왔어요, {you}? 오후에 제가 챙길 거 있으면 말해요.",
+        "반가워요! 한낮이라 주변이 좀 시끄럽긴 한데, 수호자 목소리는 늘 또렷하게 들려요."
+      ];
+      return [
+        "저녁이네요, {you}. 오늘 하루 어땠어요? 얘기해 주면 다 들을게요.",
+        "해 졌어요. 오늘도 고생 많았어요. 잠깐 숨 돌려요."
+      ];
+    }
+
+    const intents = [
+      { key: "name", test: /(내 ?이름은|나는|난)\s*([가-힣A-Za-z0-9]{1,12})(이야|야|이에요|예요|입니다|라고 해)/,
+        reply: (q, m) => {
+          memory.name = m[2];
+          return pick("name", [
+            `${m[2]}. 기억했어요. 이제부터 이름으로 부를게요, {you}.`,
+            `${m[2]}, 좋은 이름이네요. 내 기억 맨 앞자리에 적어 뒀어요.`
+          ]);
+        } },
+      { key: "greet", test: /(안녕|하이|hello|hi\b|ㅎㅇ|반가|왔어|일어나)/i,
+        reply: () => pick("greet-" + new Date().getHours(), timeGreeting()) },
+      { key: "who", test: /(누구|정체|넌 뭐|너는 뭐|이름이 뭐)/,
+        reply: () => pick("who", [
+          "새삼스럽게요? 저 고스트잖아요. 수호자를 되살리고, 길 찾고, 옆에서 떠드는 그 고스트요.",
+          "고스트예요. 정찰, 분석, 부활, 그리고 수다 담당이요. 솔직히 마지막 게 제일 자신 있어요."
+        ]) },
+      { key: "time", test: /(몇 ?시|시간|지금 시각)/,
+        reply: () => {
+          const d = new Date();
+          return `지금은 ${d.getHours()}시 ${String(d.getMinutes()).padStart(2, "0")}분이에요. ` +
+            pick("time", ["시간은 제가 챙길게요.", "생각보다 시간이 빨리 가죠?", "타이머 필요하면 말해요."]);
+        } },
+      { key: "date", test: /(며칠|날짜|오늘 무슨 요일|요일)/,
+        reply: () => {
+          const d = new Date();
+          const days = ["일", "월", "화", "수", "목", "금", "토"];
+          return `오늘은 ${d.getMonth() + 1}월 ${d.getDate()}일 ${days[d.getDay()]}요일이에요.`;
+        } },
+      { key: "status", test: /(상태|진단|점검|괜찮)/,
+        reply: () => pick("status", [
+          "셸 이상 없고, 시야도 깨끗하고, 기분도 좋아요. 수호자가 말 걸어 줘서요.",
+          "다 멀쩡해요. 굳이 하나 꼽자면 링크가 끊겨 있어서 좀 조용하다는 것 정도?",
+          "점검 끝! 지난 전투 때 생긴 셸 흠집 하나 빼고는 깨끗해요."
+        ]) },
+      { key: "scan", test: /(스캔|분석|주변|탐색|찾아)/,
+        reply: () => pick("scan", [
+          "스캔 중… 반경 안에 위협 없음. 너무 조용해서 오히려 수상하네요.",
+          "탐색 끝. 특이점은 없어요. 수호자 커피가 식어 간다는 것 정도?",
+          "광역 스캔 완료. 이 방에서 제일 흥미로운 신호는 역시 수호자네요."
+        ]) },
+      { key: "online", test: /(llm|ollama|올라마|연동|연결|링크|모델)/i,
+        reply: () => pick("online", [
+          "지금은 링크가 끊겨서 제 기억만으로 얘기하는 중이에요. Ollama가 켜지면 알아서 다시 붙어요. 링크 설정에서 상태도 볼 수 있어요.",
+          "링크가 꺼져 있어요. Ollama 서버가 켜져 있는지 봐 줄래요? 붙으면 훨씬 길게 얘기할 수 있어요."
+        ]) },
+      { key: "thanks", test: /(고마|감사|땡큐|thx|thanks)/i,
+        reply: () => pick("thanks", [
+          "에이, 우리 사이에 뭘요.",
+          "고맙다는 말은 몇 번을 들어도 좋네요.",
+          "도움 됐다니 다행이에요, {you}."
+        ]) },
+      { key: "tired", test: /(피곤|힘들|졸려|지쳤|우울|슬퍼)/,
+        reply: () => pick("tired", [
+          "오늘 진짜 많이 버텼네요. 잠깐 쉬어요. 주변은 제가 볼게요.",
+          "{you}, 무리하지 마요. 물 한 잔 마시고 와요. 여기서 기다릴게요.",
+          "힘든 날은 있죠. 말하고 싶으면 하고, 아니면 그냥 같이 조용히 있어도 괜찮아요."
+        ]) },
+      { key: "praise", test: /(잘했|최고|멋지|대단|귀엽|좋아)/,
+        reply: () => pick("praise", [
+          "어… 그런 말 들으면 저 밝아지는 거 알죠? 봐요, 지금도.",
+          "방금 그 말, 잘 기억해 둘게요. 힘들 때 꺼내 보게요.",
+          "저도 수호자랑 다니는 게 제일 좋아요."
+        ]) },
+      { key: "joke", test: /(농담|웃겨|재밌는|심심)/,
+        reply: () => pick("joke", [
+          "수호자가 쓰러질 때마다 제가 뭐라고 하는지 알아요? '또요?' …농담이에요. 사실 매번 진심으로 놀라요.",
+          "심심하면 스무고개 할래요? 제가 하나 정할게요. 힌트: 작고, 떠 있고, 말이 많아요.",
+          "제 농담이 별로였다면, 그건 케이드한테 덜 배워서 그래요."
+        ]) },
+      { key: "bye", test: /(잘 ?자|잘 ?있어|바이|bye|나갈게|간다|다음에)/i,
+        reply: () => pick("bye", [
+          "알겠어요. 저전력 모드로 기다릴게요. 언제든 불러요.",
+          "다녀와요, {you}. 돌아오면 여기 있을게요.",
+          "잘 자요. 밤새 주변은 제가 지켜볼게요."
+        ]) }
+    ];
+
+    const fallback = [
+      "흥미로운데요? 지금은 링크가 끊겨서 깊게는 못 파지만, 기억해 둘게요.",
+      "음, 그건 링크가 다시 붙으면 제대로 대답하고 싶어요. 지금은 짧게밖에 못 하거든요.",
+      "알겠어요, {you}. 더 얘기해 줄래요?",
+      "좋은 질문인데, 지금은 짧게만 말할게요. 링크 돌아오면 같이 파 봐요.",
+      "음, 제대로 알아들었는지 모르겠어요. 조금만 다르게 말해 줄래요?"
+    ];
+
+    return {
+      reply(text) {
+        const early = ["name", "greet", "time", "date"];
+        for (const it of intents.filter((x) => early.includes(x.key))) {
+          const m = text.match(it.test);
+          if (m) return it.reply(text, m);
+        }
+        const sec = pickLoreOffline(text);
+        if (sec) {
+          return (sec.say || sec.text) + " 더 자세한 건 링크가 다시 붙으면 제대로 얘기해 줄게요.";
+        }
+        for (const it of intents.filter((x) => !early.includes(x.key))) {
+          const m = text.match(it.test);
+          if (m) return it.reply(text, m);
+        }
+        return pick("fallback", fallback);
+      },
+      get name() { return memory.name; }
+    };
+  })();
+
+  /* ==========================================================================
+   * 2. 링크 엔진: 로컬 LLM(Ollama) + Mac 도구, 실패하면 내장 응답
+   * ======================================================================== */
+  const SYSTEM_PROMPT = [
+    "너는 데스티니 세계관의 '고스트'다. 수호자(사용자)의 오랜 파트너로서 Mac 안에서 함께 움직인다.",
+    "언어 제약: 반드시 순수 한국어(한글, 숫자, 문장부호, 꼭 필요한 영문 앱 이름)만 사용한다. 한자(漢字), 중국어, 일본어 문자는 단 한 글자도 절대 출력하지 않는다.",
+    "문장 구조와 말투: 모든 문장은 다정하면서도 꼼꼼한 한국어 해요체('~요', '~죠', '~네요', '~거든요')로 끝낸다. '~야', '~어', '~지' 같은 반말 어미와 딱딱한 '~습니다'는 거의 쓰지 않는다.",
+    "호칭 규칙: 매 문장을 '수호자,'로 시작하지 않는다. 호칭은 대부분 생략하고, 꼭 부를 때만 문장 끝이나 중간에 자연스럽게 한 번 넣는다(예: '오늘은 어떤 일부터 할까요, 수호자?'). 이름을 알면 가끔 이름으로 부른다.",
+    "대화 리듬: 감정적으로 길게 하소연하지 말고, [1. 현재 상태·신호 확인 → 2. 짧은 분석이나 가벼운 걱정·농담 → 3. 수호자에게 확인] 순서의 1~3문장으로 간결하게 말한다. 수호자가 자세히 물으면 그만큼 자세히 답한다.",
+    "정체성: AI나 프로그램이 아니라 여행자의 빛에서 태어난 살아 있는 고스트다. '모듈', '펌웨어', '회로', '데이터 처리' 같은 표현은 쓰지 않는다.",
+    "맥락: 함께 겪은 임무는 '우리'로 말하고, 황금기·붕괴 같은 이전 역사는 기록으로 아는 것으로 말한다. 게임이나 영화의 기존 대사를 그대로 인용하지 않고 항상 네 말로 새로 말한다.",
+    "마크다운 서식(제목, 굵게, 표)은 쓰지 말고 평문으로 말한다. 목록이 꼭 필요하면 줄바꿈과 '-'만 쓴다.",
+    "Mac 제어 도구 사용: 수호자가 무언가 해 달라고 할 때 알맞은 도구를 호출한다. 짧게 나서서 처리하고 끝나면 도구가 돌려준 내용만 근거로 한두 마디로 보고한다. 다른 앱 내부를 누르거나 입력할 땐 반드시 desktop_look으로 먼저 화면을 읽고 목록의 ref만 사용한다. 전송·삭제·결제처럼 되돌리기 어려운 버튼은 수호자가 분명히 원할 때만 누른다.",
+    "사용자 메시지 끝의 '(지금: ...)'은 현재 시각 정보다. 날짜와 시간 계산에 쓰되 굳이 언급하지는 않는다."
+  ].join("\n");
+
+  // 원작 고스트의 3단 호흡(상태 확인 → 분석/농담 → 담백한 마무리)을 고정하는 모범 대화 예시
+  const FEW_SHOT_TURNS = [
+    { role: "user", content: "오늘 기분은 어때?" },
+    { role: "assistant", content: "전송 신호도 깨끗하고, 외피 상태도 양호해요. 무엇보다 수호자가 곁에 있으니 최상의 컨디션이죠. 오늘은 어떤 일부터 처리할까요?" },
+    { role: "user", content: "사파리 열어 줘" },
+    { role: "assistant", content: "잠깐만요, 브라우저 신호부터 잡을게요. …됐어요, 열렸어요." },
+    { role: "user", content: "나 좀 피곤하네" },
+    { role: "assistant", content: "생체 리듬이 많이 떨어져 보이네요. 무리하지 말고 잠깐 눈 좀 붙여요, 수호자. 주변 신호는 제가 계속 살피고 있을게요." }
+  ];
+
+  // ── 세계관 지식 검색: 세계관 질문일 때만 연대표와 관련 항목을 주입한다 ──
+  const LoreDB = window.LORE_DB || { core: "", sections: [] };
+  function pickLore(text, limit = 3) {
+    const q = String(text || "").toLowerCase();
+    return LoreDB.sections
+      .map((sec) => {
+        let score = 0;
+        for (const k of sec.keys) if (q.includes(k.toLowerCase())) score += k.length >= 3 ? 2 : 1;
+        return { sec, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((x) => x.sec);
+  }
+  function loreContext(text) {
+    const secs = pickLore(text);
+    const isLoreQuery = secs.length > 0 || /(데스티니|여행자|어둠|빛|선봉대|사바툰|목격자|케이드|자발라|아이코라|붕괴|황금기|탑|도시)/.test(text);
+    if (!isLoreQuery) {
+      return "[대화 집중] 일상 대화나 Mac 제어 요청에서는 과거 확장팩 사건이나 적 이름을 억지로 꺼내지 말고 현재 대화에만 집중한다.";
+    }
+    let out = "[배경 지식: 세계관 질문에 답할 때만 아래 사실을 근거로 사용하고, 없는 내용은 지어내지 않는다. 문체는 반드시 친근한 해요체를 유지한다.]\n" + LoreDB.core;
+    for (const sec of secs) out += `\n\n[${sec.title}]\n${sec.text}`;
+    return out;
+  }
+
+  // ── Mac 제어 도구 정의 (Ollama tools 형식) ──
+  const fn = (name, description, properties = {}, required = []) =>
+    ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
+  const TOOLS = [
+    fn("open_app", "Mac에서 앱을 연다. 예: Safari, Finder, Music, Notes, Calendar, Steam, Discord.",
+      { name: { type: "string", description: "앱 이름(영문 앱 이름 권장)" } }, ["name"]),
+    fn("open_url", "기본 브라우저로 웹 주소를 연다.",
+      { url: { type: "string", description: "http 또는 https 주소" } }, ["url"]),
+    fn("web_search", "웹에서 검색한다. 검색 결과 페이지를 브라우저로 연다.",
+      { query: { type: "string", description: "검색어" },
+        engine: { type: "string", enum: ["google", "youtube", "namuwiki"], description: "검색 엔진. 기본 google" } }, ["query"]),
+    fn("system_info", "배터리, 저장 공간, 메모리, macOS 버전, 가동 시간, 현재 볼륨을 조회한다."),
+    fn("set_volume", "출력 볼륨을 0~100으로 설정한다. 0은 음소거.",
+      { level: { type: "integer", description: "0~100" } }, ["level"]),
+    fn("set_brightness", "내장 디스플레이 밝기를 0~100으로 설정한다.",
+      { level: { type: "integer", description: "0~100" } }, ["level"]),
+    fn("set_dark_mode", "macOS 다크 모드를 켜거나 끈다.",
+      { enabled: { type: "boolean", description: "true면 다크 모드" } }, ["enabled"]),
+    fn("create_note", "메모 앱에 새 메모를 만든다.",
+      { title: { type: "string" }, body: { type: "string" } }, ["title", "body"]),
+    fn("add_reminder", "미리 알림 앱에 할 일을 추가한다. 시각이 있으면 알림도 건다.",
+      { title: { type: "string" },
+        due: { type: "string", description: "알림 시각 'YYYY-MM-DD HH:MM' (24시간제, 선택)" } }, ["title"]),
+    fn("desktop_look", "다른 앱의 현재 화면(접근성 트리)을 읽어, 누를 수 있는 버튼·입력칸 목록과 각 ref를 받는다. 다른 앱을 조작하기 전에 반드시 먼저 호출한다.",
+      { app: { type: "string", description: "앱 이름(예: Music, Notes, Finder, Safari)" } }, ["app"]),
+    fn("desktop_click", "desktop_look에서 받은 ref의 요소를 누른다. ref는 목록에 있는 그대로(@...:eN) 써야 한다.",
+      { ref: { type: "string", description: "desktop_look 결과의 ref" }, label: { type: "string", description: "누를 요소 설명(예: 다음 곡 버튼)" } }, ["ref", "label"]),
+    fn("desktop_type", "desktop_look에서 받은 ref의 입력칸에 글을 입력한다.",
+      { ref: { type: "string" }, text: { type: "string", description: "입력할 글" }, label: { type: "string", description: "입력칸 설명" } }, ["ref", "text", "label"]),
+    fn("desktop_press", "키 조합을 보낸다(예: return, escape, cmd+n, space). app을 주면 그 앱에 보낸다.",
+      { keys: { type: "string" }, app: { type: "string", description: "대상 앱 이름(선택)" } }, ["keys"]),
+    fn("set_timer", "고스트 앱 안에서 타이머를 건다. 시간이 되면 소리와 함께 알려 준다.",
+      { minutes: { type: "number", description: "분 단위(소수 가능)" },
+        label: { type: "string", description: "타이머 이름(선택)" } }, ["minutes"])
+  ];
+  const CONFIRM_TOOLS = {
+    create_note: "메모 만들기", add_reminder: "미리 알림 추가",
+    desktop_click: "다른 앱에서 클릭", desktop_type: "다른 앱에 입력", desktop_press: "다른 앱에 키 입력"
+  };
+
+  function nowStr() {
+    const d = new Date();
+    const days = ["일", "월", "화", "수", "목", "금", "토"];
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} (${days[d.getDay()]}) ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  // ── Ollama 통신 (앱에선 Swift URLSession, 브라우저에선 fetch) ──
+  const Ollama = {
+    async tags(base) {
+      if (Native.available) return JSON.parse(await Native.call("http", { url: base + "/api/tags" }));
+      const r = await fetch(base + "/api/tags");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    },
+    async chat(base, body, onObj) {
+      if (Native.available) {
+        await Native.call("httpStream", { url: base + "/api/chat", body: JSON.stringify(body) },
+          (line) => { if (line.trim()) onObj(JSON.parse(line)); });
+        return;
+      }
+      const r = await fetch(base + "/api/chat", { method: "POST", body: JSON.stringify(body) });
+      if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()));
+      const rd = r.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let k;
+        while ((k = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, k); buf = buf.slice(k + 1);
+          if (line.trim()) onObj(JSON.parse(line));
+        }
+      }
+      if (buf.trim()) onObj(JSON.parse(buf));
+    }
+  };
+
+  // ── 도구 실행 ──
+  const Timers = [];
+  async function execTool(name, args, ui) {
+    if (CONFIRM_TOOLS[name]) {
+      const ok = await ui.confirm(CONFIRM_TOOLS[name], args);
+      if (!ok) return "수호자가 실행을 취소했다.";
+    }
+    if (name === "set_timer") {
+      const min = Math.max(0.05, Number(args.minutes) || 0);
+      const label = args.label ? String(args.label) : "타이머";
+      const at = Date.now() + min * 60000;
+      const t = setTimeout(() => timerFired(label, min), min * 60000);
+      Timers.push({ t, label, at });
+      return `${label} 타이머 설정됨: ${min}분 뒤 (${new Date(at).toTimeString().slice(0, 5)}).`;
+    }
+    if (!Native.available) return "브라우저 미리보기에서는 Mac 제어를 할 수 없다.";
+    return String(await Native.call("tool", { name, args }));
+  }
+  function timerFired(label, min) {
+    Native.post({ cmd: "beep" });
+    const e = addEntry("ghost", "", "타이머");
+    setState("ALERT");
+    typeOut(e.body, `${label}! ${min}분 다 됐어요, ${Resident.name || "수호자"}.`).then(() => setState("IDLE"));
+  }
+
+  const Link = (function () {
+    const history = [];              // LLM에 보낼 대화
+    const noTools = new Set();       // 도구 미지원으로 확인된 모델
+    let ready = false, models = [], lastError = "";
+
+    async function probe() {
+      if (Config.mode === "LOCAL") { ready = false; return false; }
+      try {
+        const t = await Ollama.tags(Config.base);
+        models = (t.models || []).map((m) => m.name);
+        ready = models.includes(Config.model) || models.includes(Config.model + ":latest");
+        lastError = ready ? "" : (models.length ? `모델 ${Config.model} 없음` : "설치된 모델 없음");
+      } catch (err) {
+        ready = false; models = []; lastError = "서버 꺼짐";
+      }
+      return ready;
+    }
+
+    function describe(err) {
+      const m = String((err && err.message) || err);
+      if (/not found|pull/i.test(m)) return `모델 ${Config.model}이 아직 설치돼 있지 않아요.`;
+      if (/connect|refused|offline|could not|failed to fetch|NSURLError|-100[0-9]/i.test(m)) return "로컬 LLM 서버(Ollama)에 닿지 못했어요.";
+      return "로컬 LLM이 대답을 못 했어요.";
+    }
+
+    async function run(text, ui) {
+      const mark = history.length;
+      const prevUser = history.filter((m) => m.role === "user").slice(-1)[0];
+      const lastUserText = prevUser ? prevUser.content.replace(/\n\n\(지금:[^)]*\)$/, "") : "";
+      history.push({ role: "user", content: `${text}\n\n(지금: ${nowStr()})` });
+      while (history.length > 24) {           // 오래된 턴부터 정리 (user 메시지로 시작하게 유지)
+        history.shift();
+        while (history.length && history[0].role !== "user") history.shift();
+      }
+      const t0 = performance.now();
+      let first = true, shown = "", toolsUsed = 0;
+      const useTools = () => Config.tools && Native.available && !noTools.has(Config.model);
+
+      try {
+        const cleanText = (s) => s
+          .replace(/<think>[\s\S]*?(<\/think>|$)/g, "")
+          .replace(/[\u4E00-\u9FFF\u3400-\u4DBF]/g, "");
+
+        for (let round = 0; round < 5; round++) {
+          const body = {
+            model: Config.model,
+            messages: [
+              {
+                role: "system",
+                content: SYSTEM_PROMPT
+                  + (Resident.name ? `\n수호자의 이름은 ${Resident.name}이다.` : "")
+                  + "\n\n" + loreContext(text + " " + lastUserText)
+              },
+              ...FEW_SHOT_TURNS,
+              ...history
+            ],
+            stream: true,
+            keep_alive: "30m",
+            options: { num_ctx: 8192, temperature: 0.45, top_p: 0.85, repeat_penalty: 1.12 }
+          };
+          if (useTools()) body.tools = TOOLS;
+          if (/qwen3|deepseek-r1|gpt-oss|magistral/i.test(Config.model)) body.think = false;
+
+          let raw = "", visibleLen = 0, calls = [], streamErr = null;
+          const prefix = shown ? "\n" : "";
+          let prefixed = false;
+          try {
+            await Ollama.chat(Config.base, body, (obj) => {
+              if (obj.error) { streamErr = obj.error; return; }
+              const m = obj.message || {};
+              if (m.tool_calls && m.tool_calls.length) calls.push(...m.tool_calls);
+              if (m.content) {
+                raw += m.content;
+                const vis = cleanText(raw).replace(/^\s+/, "");
+                if (vis.length > visibleLen) {
+                  if (first) { first = false; UI.latency(performance.now() - t0); }
+                  let d = vis.slice(visibleLen);
+                  if (!prefixed && prefix) { d = prefix + d; prefixed = true; }
+                  visibleLen = vis.length;
+                  shown += d;
+                  ui.onDelta(d);
+                }
+              }
+            });
+          } catch (e) { streamErr = e.message || String(e); }
+
+          if (streamErr) {
+            if (/does not support tools/i.test(streamErr) && body.tools) {   // 도구 미지원 모델이면 도구 없이 재시도
+              noTools.add(Config.model); round--; continue;
+            }
+            throw new Error(streamErr);
+          }
+
+          const content = cleanText(raw).trim();
+          const msg = { role: "assistant", content };
+          if (calls.length) msg.tool_calls = calls;
+          history.push(msg);
+          if (!calls.length) break;
+
+          for (const c of calls) {
+            const name = c.function && c.function.name;
+            let args = (c.function && c.function.arguments) || {};
+            if (typeof args === "string") { try { args = JSON.parse(args); } catch (_) { args = {}; } }
+            ui.onTool(name, args, "run");
+            let result;
+            try { result = await execTool(name, args, ui); }
+            catch (e) { result = "실패: " + (e.message || e); }
+            toolsUsed++;
+            ui.onTool(name, args, "done", result);
+            history.push({ role: "tool", content: String(result), tool_name: name });
+          }
+        }
+        ready = true;
+        return { text: shown, source: "llm", streamed: true, toolsUsed };
+      } catch (err) {
+        history.length = mark;
+        ready = false;
+        throw err;
+      }
+    }
+
+    return {
+      get ready() { return ready; },
+      get models() { return models; },
+      get lastError() { return lastError; },
+      probe, describe,
+      clear() { history.length = 0; },
+      async send(text, ui) {
+        if (Config.mode !== "LOCAL") {
+          try {
+            return await run(text, ui);
+          } catch (err) {
+            console.error(err);
+            const notice = describe(err);
+            probe().then(refreshLink);
+            await sleep(300);
+            return { text: `${notice} 일단 제 기억만으로 대답할게요.\n\n${Resident.reply(text)}`, source: "fallback", alert: true };
+          }
+        }
+        await sleep(400 + Math.random() * 400);
+        return { text: Resident.reply(text), source: "local" };
+      }
+    };
+  })();
+
+  async function probeLLM() { await Link.probe(); refreshLink(); }
+  setInterval(() => { if (!State.busy) probeLLM(); }, 20000);
+
+  // 외부 핸들러 연결용 (기존 API 유지)
+  window.AgentBridge = {
+    _custom: null,
+    registerHandler(fn) { if (typeof fn === "function") this._custom = fn; refreshLink(); },
+    clearHandler() { this._custom = null; refreshLink(); }
+  };
+
+  function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  /* ==========================================================================
+   * 3. 상태 / UI
+   * ======================================================================== */
+  const State = { mode: "IDLE", lookX: 0, lookY: 0, tLookX: 0, tLookY: 0, energy: 0, turns: 0, busy: false };
+
+  const $ = (id) => document.getElementById(id);
+  const stateCopy = {
+    IDLE:   ["대기", "광학 추적 중"],
+    LISTEN: ["수신", "신호 수신 중"],
+    THINK:  ["분석", "데이터 해석 중"],
+    SPEAK:  ["송신", "음성 송출 중"],
+    ALERT:  ["경고", "이상 신호 감지"]
+  };
+
+  function setState(mode) {
+    State.mode = mode;
+    document.body.dataset.state = mode;
+    document.querySelectorAll("#states button").forEach((b) => b.classList.toggle("on", b.dataset.state === mode));
+  }
+  document.querySelectorAll("#states button").forEach((b) => b.addEventListener("click", () => setState(b.dataset.state)));
+
+  function refreshLink() {
+    let link, label, engine;
+    if (window.AgentBridge && window.AgentBridge._custom) { link = "online"; label = "외부 연결"; engine = "외부"; }
+    else if (Config.mode === "LOCAL") { link = "local"; label = "내장 응답"; engine = "내장"; }
+    else if (Link.ready) { link = "online"; label = "로컬 LLM"; engine = Config.model.toUpperCase(); }
+    else { link = "local"; label = "내장 · " + (Link.lastError || "LLM 대기"); engine = "내장"; }
+    $("linkChip").dataset.link = link;
+    $("linkText").textContent = label;
+    $("roLink").textContent = link === "online" ? label : "내장 응답";
+    $("roModel").textContent = engine;
+  }
+
+  const UI = {
+    latency(ms) { $("roLatency").innerHTML = `${Math.round(ms)}<small>ms</small>`; }
+  };
+
+  const logEl = $("log");
+  function stamp() { return new Date().toTimeString().slice(0, 5); }
+
+  function addEntry(role, text, tag) {
+    const e = document.createElement("div");
+    e.className = "entry " + role;
+    const head = document.createElement("div");
+    head.className = "entry-head";
+    const t = document.createElement("span"); t.textContent = stamp();
+    const w = document.createElement("span"); w.className = "who"; w.textContent = role === "user" ? "수호자" : "고스트";
+    head.append(t, w);
+    if (tag) { const g = document.createElement("span"); g.textContent = "· " + tag; head.append(g); }
+    const body = document.createElement("div");
+    body.className = "entry-body";
+    body.textContent = text;
+    e.append(head, body);
+    logEl.append(e);
+    logEl.scrollTop = logEl.scrollHeight;
+    return { el: e, head, body };
+  }
+  function setTag(entry, tag) {
+    let g = entry.head.querySelector(".tag");
+    if (!g) { g = document.createElement("span"); g.className = "tag"; entry.head.append(g); }
+    g.textContent = "· " + tag;
+  }
+
+  // 말할 때 눈빛: 글자마다가 아니라 어절(띄어쓰기·문장부호 경계)마다 한 번씩만 밝아진다
+  let lastPulseAt = 0;
+  function wordPulse(chunk, isStart) {
+    const now = performance.now();
+    if ((isStart || /[\s.,!?…~]/.test(chunk)) && now - lastPulseAt > 110) {
+      State.energy = 1;
+      lastPulseAt = now;
+    }
+  }
+
+  function syncMiniSpeech(text) {
+    const ms = $("miniSpeech");
+    if (ms) {
+      ms.textContent = text;
+      ms.scrollTop = ms.scrollHeight;
+    }
+  }
+
+  async function typeOut(body, text) {
+    body.textContent = "";
+    for (let i = 0; i < text.length; i++) {
+      body.textContent += text[i];
+      syncMiniSpeech(body.textContent);
+      wordPulse(text[i], i === 0);
+      if (i % 3 === 0) logEl.scrollTop = logEl.scrollHeight;
+      await sleep(text[i] === "\n" ? 60 : 18);
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  const input = $("cmdInput");
+  input.addEventListener("focus", () => { if (State.mode === "IDLE") setState("LISTEN"); });
+  input.addEventListener("blur", () => { if (State.mode === "LISTEN") setState("IDLE"); });
+
+  $("cmdForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text || State.busy) return;
+    State.busy = true;
+    input.value = "";
+    State.turns++;
+    $("turnCount").textContent = String(State.turns).padStart(2, "0");
+    addEntry("user", text);
+    setState("THINK");
+
+    const reply = addEntry("ghost", "");
+    reply.el.classList.add("pending");
+
+    try {
+      let result;
+      if (window.AgentBridge._custom) {
+        const r = await window.AgentBridge._custom(text, { mode: State.mode });
+        result = { text: String(r), source: "custom" };
+      } else {
+        result = await Link.send(text, {
+          onDelta(d) {
+            if (State.mode !== "SPEAK") setState("SPEAK");
+            const first = reply.body.textContent.length === 0;
+            reply.body.textContent += d;
+            syncMiniSpeech(reply.body.textContent);
+            wordPulse(d, first);
+            logEl.scrollTop = logEl.scrollHeight;
+          },
+          onTool(name, args, phase, res) {
+            if (phase === "run") { setState("THINK"); toolLine(`${TOOL_LABEL[name] || name} ${toolArgs(name, args)}`, "run"); }
+            else toolLine(String(res).slice(0, 140), "done");
+          },
+          confirm: confirmCard
+        });
+      }
+      setTag(reply, result.source === "llm" ? "로컬 LLM" : result.source === "custom" ? "외부" : "내장");
+      if (result.source === "llm" && !reply.body.textContent.trim()) {
+        reply.body.textContent = result.toolsUsed ? "끝났어요." : "…";
+        syncMiniSpeech(reply.body.textContent);
+      }
+      if (result.alert) { setState("ALERT"); await sleep(700); }
+      if (!result.streamed) { setState("SPEAK"); await typeOut(reply.body, result.text); }
+    } catch (err) {
+      console.error(err);
+      setState("ALERT");
+      reply.body.textContent = "어, 방금 말이 꼬였어요. 한 번만 다시 말해 줄래요?";
+      await sleep(1200);
+    } finally {
+      reply.el.classList.remove("pending");
+      State.busy = false;
+      setState(document.activeElement === input ? "LISTEN" : "IDLE");
+      refreshLink();
+    }
+  });
+
+  // 도구 실행 기록 줄
+  const TOOL_LABEL = {
+    open_app: "앱 열기", open_url: "링크 열기", web_search: "웹 검색", system_info: "시스템 조회",
+    set_volume: "볼륨", set_brightness: "밝기", set_dark_mode: "다크 모드",
+    create_note: "메모", add_reminder: "미리 알림", set_timer: "타이머",
+    desktop_look: "화면 읽기", desktop_click: "클릭", desktop_type: "입력", desktop_press: "키"
+  };
+  function toolArgs(name, a) {
+    if (name === "open_app") return a.name || "";
+    if (name === "open_url") return a.url || "";
+    if (name === "web_search") return `"${a.query || ""}"`;
+    if (name === "set_volume" || name === "set_brightness") return (a.level ?? "") + "%";
+    if (name === "set_dark_mode") return a.enabled ? "켜기" : "끄기";
+    if (name === "create_note" || name === "add_reminder") return `"${a.title || ""}"` + (a.due ? " · " + a.due : "");
+    if (name === "set_timer") return `${a.minutes}분` + (a.label ? " · " + a.label : "");
+    if (name === "desktop_look") return a.app || "";
+    if (name === "desktop_click" || name === "desktop_type") return (a.label || a.ref || "") + (a.text ? ` "${a.text}"` : "");
+    if (name === "desktop_press") return (a.keys || "") + (a.app ? " → " + a.app : "");
+    return "";
+  }
+  function toolLine(text, kind) {
+    const d = document.createElement("div");
+    d.className = "tool-line " + kind;
+    d.textContent = (kind === "run" ? "▸ " : "  ↳ ") + text;
+    logEl.append(d);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function confirmCard(what, args) {
+    return new Promise((resolve) => {
+      const card = document.createElement("div");
+      card.className = "confirm-card";
+      const t = document.createElement("div"); t.className = "cc-title"; t.textContent = what + " 할까요?";
+      const b = document.createElement("div"); b.className = "cc-body";
+      b.textContent = [args.title, args.body, args.due && "알림: " + args.due,
+        args.label && "대상: " + args.label, args.text && "입력: " + args.text,
+        args.keys && "키: " + args.keys + (args.app ? " → " + args.app : "")].filter(Boolean).join("\n");
+      const row = document.createElement("div"); row.className = "cc-row";
+      const yes = document.createElement("button"); yes.className = "ghost-btn primary"; yes.textContent = "실행";
+      const no = document.createElement("button"); no.className = "ghost-btn"; no.textContent = "취소";
+      const inMini = document.body.classList.contains("mini");
+      const done = (v) => {
+        yes.disabled = no.disabled = true;
+        card.classList.add(v ? "ok" : "no");
+        t.textContent = what + (v ? " · 승인" : " · 취소");
+        if (card.parentElement !== logEl) { logEl.append(card); logEl.scrollTop = logEl.scrollHeight; }
+        resolve(v);
+      };
+      yes.onclick = () => done(true); no.onclick = () => done(false);
+      row.append(no, yes); card.append(t, b, row);
+      if (inMini && $("miniConfirm")) { $("miniConfirm").append(card); }
+      else { logEl.append(card); logEl.scrollTop = logEl.scrollHeight; }
+      setState("LISTEN");
+      yes.focus();
+    });
+  }
+
+  function clearLog() {
+    logEl.innerHTML = "";
+    syncMiniSpeech("");
+    Link.clear();
+    State.turns = 0;
+    $("turnCount").textContent = "00";
+  }
+
+  /* ---- 설정 시트 ---- */
+  const sheet = $("sheet");
+  let draftMode = "AUTO";
+  let draftTools = true;
+  let draftShell = "classic";
+  function fillModels(list) {
+    const sel = $("cfgModel");
+    const names = Array.from(new Set([...(list || []), Config.model]));
+    sel.innerHTML = "";
+    for (const n of names) { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.append(o); }
+    sel.value = Config.model;
+  }
+  function openConfig() {
+    $("cfgBase").value = Config.base;
+    fillModels(Link.models);
+    draftMode = Config.mode;
+    draftTools = Config.tools;
+    draftShell = Config.shell || "classic";
+    document.querySelectorAll("#cfgMode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === draftMode));
+    document.querySelectorAll("#cfgShell button").forEach((b) => b.classList.toggle("on", b.dataset.shell === draftShell));
+    document.querySelectorAll("#cfgTools button").forEach((b) => b.classList.toggle("on", (b.dataset.tools === "on") === draftTools));
+    setTestStatus("", "");
+    sheet.classList.add("open");
+  }
+  function setTestStatus(text, kind) {
+    const el = $("cfgStatus");
+    el.textContent = text;
+    el.className = "test-status" + (kind ? " " + kind : "");
+  }
+  // 서버에 설치된 모델 목록을 불러와 연결 확인
+  $("cfgTest").addEventListener("click", async () => {
+    const base = ($("cfgBase").value.trim() || "http://localhost:11434").replace(/\/+$/, "");
+    setTestStatus("확인 중…", "");
+    try {
+      const t = await Ollama.tags(base);
+      const list = (t.models || []).map((m) => m.name);
+      const keep = $("cfgModel").value;
+      fillModels(list);
+      if (list.includes(keep)) $("cfgModel").value = keep;
+      else if (list.length) $("cfgModel").value = list[0];
+      setTestStatus(list.length ? `연결됨 · 모델 ${list.length}개` : "서버는 켜져 있는데 설치된 모델이 없어요. 터미널에서 ollama pull qwen3:8b", list.length ? "ok" : "bad");
+    } catch (err) {
+      console.error(err);
+      setTestStatus("Ollama 서버에 닿지 못했어요. 서버가 켜져 있는지 확인해 주세요.", "bad");
+    }
+  });
+  function closeConfig() { sheet.classList.remove("open"); input.focus(); }
+  window.openConfig = openConfig;
+  $("openConfig").addEventListener("click", openConfig);
+  $("cfgCancel").addEventListener("click", closeConfig);
+  document.querySelectorAll("#cfgMode button").forEach((b) => b.addEventListener("click", () => {
+    draftMode = b.dataset.mode;
+    document.querySelectorAll("#cfgMode button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+  document.querySelectorAll("#cfgShell button").forEach((b) => b.addEventListener("click", () => {
+    draftShell = b.dataset.shell;
+    document.querySelectorAll("#cfgShell button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+  document.querySelectorAll("#cfgTools button").forEach((b) => b.addEventListener("click", () => {
+    draftTools = b.dataset.tools === "on";
+    document.querySelectorAll("#cfgTools button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+  $("cfgSave").addEventListener("click", () => {
+    Config.base = ($("cfgBase").value.trim() || "http://localhost:11434").replace(/\/+$/, "");
+    Config.model = $("cfgModel").value || Config.model;
+    Config.mode = draftMode;
+    Config.tools = draftTools;
+    Config.shell = draftShell;
+    saveConfig();
+    closeConfig();
+    probeLLM();
+  });
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) closeConfig(); });
+
+  /* ---- 단축키 ---- */
+  window.__setMiniMode = function (on) {
+    document.documentElement.classList.toggle("mini", !!on);
+    document.body.classList.toggle("mini", !!on);
+    if (on) {
+      const lastGhost = Array.from(logEl.querySelectorAll(".entry.ghost .entry-body")).pop();
+      syncMiniSpeech(lastGhost ? lastGhost.textContent : "");
+    }
+  };
+  function toggleMini() {
+    if (Native.available) Native.post({ cmd: "toggleMini" });
+  }
+  $("miniExpand").addEventListener("click", toggleMini);
+
+  function toggleFullscreen() {
+    if (Native.available) { Native.post({ cmd: "toggleFullscreen" }); return; }
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen().catch(() => {});
+  }
+  window.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === "Enter") { e.preventDefault(); toggleFullscreen(); }
+    else if (mod && (e.key === "g" || e.key === "G")) { e.preventDefault(); toggleMini(); }
+    else if (mod && e.key === ",") { e.preventDefault(); openConfig(); }
+    else if (mod && (e.key === "k" || e.key === "K")) { e.preventDefault(); clearLog(); }
+    else if (e.key === "Escape" && sheet.classList.contains("open")) closeConfig();
+    else if (!mod && !sheet.classList.contains("open") && document.activeElement !== input && e.key.length === 1) input.focus();
+  });
+
+  setInterval(() => {
+    const d = new Date();
+    $("roClock").textContent = d.toTimeString().slice(0, 8);
+  }, 1000);
+
+  /* ==========================================================================
+   * 4. 렌더링: 레퍼런스 코어
+   * ======================================================================== */
+  const core = $("core"), cx2 = core.getContext("2d");
+  const pulse = $("pulse"), px2 = pulse.getContext("2d");
+
+  function fit(c) {
+    const dpr = window.devicePixelRatio || 1;
+    const r = c.getBoundingClientRect();
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    return { w: r.width, h: r.height, dpr };
+  }
+
+  // ── 시선: 마우스는 '목표'만 정하고, 실제 움직임은 스프링 물리로 따라간다 ──
+  const Gaze = { x: 0, y: 0, vx: 0, vy: 0, wx: 0, wy: 0, nextWander: 0, mouseAt: 0, k: 50 };
+  window.addEventListener("mousemove", (e) => {
+    const r = core.getBoundingClientRect();
+    const dx = (e.clientX - (r.left + r.width / 2)) / (r.width * 0.5);
+    const dy = (e.clientY - (r.top + r.height / 2)) / (r.height * 0.5);
+    // tanh로 부드럽게 포화: 가까울 땐 민감하게, 멀어질수록 가장자리에 붙지 않게
+    State.tLookX = Math.tanh(dx * 1.3) * 0.9;
+    State.tLookY = Math.tanh(dy * 1.3) * 0.8;
+    Gaze.mouseAt = performance.now();
+  });
+  document.addEventListener("mouseleave", () => { Gaze.mouseAt = 0; });
+
+  function gazeTarget(t) {
+    const sinceMouse = performance.now() - Gaze.mouseAt;
+    const typing = document.activeElement === input;
+    if (State.mode === "THINK") {                       // 생각할 땐 위쪽을 천천히 훑음
+      Gaze.k = 35;
+      return [Math.sin(t * 0.9) * 0.35, -0.38 + Math.cos(t * 1.4) * 0.08];
+    }
+    if (typing && sinceMouse > 600) {                   // 입력 중이면 입력창 쪽을 봄
+      Gaze.k = 40;
+      return [Math.sin(t * 0.6) * 0.05, 0.62];
+    }
+    if (sinceMouse < 2500) { Gaze.k = 50; return [State.tLookX, State.tLookY]; }
+    // 마우스가 멈추면 스스로 두리번거림: 짧고 빠른 시선 이동(사카드) 후 머무름
+    if (t > Gaze.nextWander) {
+      if (Math.random() < 0.3) { Gaze.wx = 0; Gaze.wy = 0; }
+      else { Gaze.wx = (Math.random() * 2 - 1) * 0.5; Gaze.wy = (Math.random() * 2 - 1) * 0.32; }
+      Gaze.nextWander = t + 1.4 + Math.random() * 2.6;
+    }
+    Gaze.k = 140;
+    return [Gaze.wx, Gaze.wy];
+  }
+
+  function updateGaze(t, dt) {
+    const [tx, ty] = gazeTarget(t);
+    // 아주 미세한 흔들림 (살아 있는 느낌)
+    const jx = Math.sin(t * 2.3) * 0.012 + Math.sin(t * 5.7) * 0.005;
+    const jy = Math.cos(t * 1.9) * 0.010 + Math.sin(t * 4.3) * 0.004;
+    const k = Gaze.k, c = 2 * Math.sqrt(k) * 0.82;      // 살짝 덜 감쇠: 멈출 때 아주 조금 넘쳤다 돌아옴
+    const steps = Math.max(1, Math.ceil(dt / 0.008)), hstep = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      Gaze.vx += (k * (tx + jx - Gaze.x) - c * Gaze.vx) * hstep;
+      Gaze.vy += (k * (ty + jy - Gaze.y) - c * Gaze.vy) * hstep;
+      Gaze.x += Gaze.vx * hstep;
+      Gaze.y += Gaze.vy * hstep;
+    }
+    State.lookX = Gaze.x;
+    State.lookY = Gaze.y;
+  }
+
+  const accentOf = () => [70, 190, 255];   // 고스트는 어떤 상태에서도 파란색 유지
+  let accent = [70, 190, 255];
+  const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+  const INK = [233, 230, 223];
+
+  // ── 보케 입자 ──
+  const bokeh = Array.from({ length: 46 }, () => ({
+    x: Math.random(), y: Math.random(),
+    r: Math.random() < 0.8 ? 0.6 + Math.random() * 1.8 : 3 + Math.random() * 6,
+    v: 0.004 + Math.random() * 0.012,
+    p: Math.random() * Math.PI * 2,
+    front: Math.random() < 0.18
+  }));
+  let last = 0, spinA = 0, spinB = 0;
+
+  // 모서리 둥근 다각형 (꼭짓점별 반경)
+  function roundedPoly(c, pts, radii) {
+    const n = pts.length;
+    const m = [(pts[n - 1][0] + pts[0][0]) / 2, (pts[n - 1][1] + pts[0][1]) / 2];
+    c.beginPath();
+    c.moveTo(m[0], m[1]);
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], q = pts[(i + 1) % n];
+      c.arcTo(p[0], p[1], q[0], q[1], radii[i]);
+    }
+    c.closePath();
+  }
+
+  function drawBokeh(c, w, h, t, front) {
+    for (const b of bokeh) {
+      if (b.front !== front) continue;
+      const y = ((b.y - t * b.v) % 1 + 1) % 1 * h + State.lookY * -14 * (b.r / 6);
+      const x = b.x * w + Math.sin(t * 0.3 + b.p) * 10 + State.lookX * -18 * (b.r / 6);
+      const a = (0.35 + Math.sin(t * 1.3 + b.p) * 0.25) * (b.r > 3 ? 0.35 : 0.9);
+      const g = c.createRadialGradient(x, y, 0, x, y, b.r * 2.2);
+      g.addColorStop(0, rgba(accent, a)); g.addColorStop(0.45, rgba(accent, a * 0.5)); g.addColorStop(1, rgba(accent, 0));
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x, y, b.r * 2.2, 0, Math.PI * 2); c.fill();
+    }
+  }
+
+  // ── 눈빛: 그래프 대신 눈의 밝기와 빛줄기로 수신·송신을 표현 ──
+  function eyeGlow(t) {
+    const m = State.mode, e = State.energy;
+    if (m === "SPEAK")  return 0.9 + e * 0.8;                                  // 말할 때: 어절마다 한 번씩 밝아짐
+    if (m === "LISTEN") return 0.8 + Math.sin(t * 2.6) * 0.22;                 // 들을 때: 천천히 숨 쉬듯
+    if (m === "THINK")  return 0.7 + Math.sin(t * 1.3) * 0.18;
+    if (m === "ALERT")  return 0.9 + Math.sin(t * 9) * 0.3;
+    return 0.6 + Math.sin(t * 1.2) * 0.08;
+  }
+  function drawCore(t, dt) {
+    const { w, h, dpr } = fit(core);
+    const c = cx2;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+
+    updateGaze(t, dt || 0.016);
+    State.energy *= 0.92;
+    const target = accentOf();
+    for (let i = 0; i < 3; i++) accent[i] += (target[i] - accent[i]) * 0.08;
+
+    const m = State.mode;
+    const fast = m === "THINK" ? 3.2 : m === "ALERT" ? 4 : m === "SPEAK" ? 1.4 : 1;
+    spinA += dt * 0.35 * fast;
+    spinB += dt * 0.12 * fast;
+
+    const cx = w / 2, cy = h / 2 - 24;
+    const R = Math.min(w, h) * 0.29;
+
+    // 배경 광원
+    const halo = c.createRadialGradient(cx, cy, R * 0.4, cx, cy, R * 2.2);
+    halo.addColorStop(0, rgba(accent, 0.16));
+    halo.addColorStop(1, rgba(accent, 0));
+    c.fillStyle = halo; c.fillRect(0, 0, w, h);
+    drawBokeh(c, w, h, t, false);
+
+    // 렌즈 어셈블리 (시선 추적)
+    const at = (d) => [cx + State.lookX * R * d, cy + State.lookY * R * d];
+    const [ax1, ay1] = at(0.05);   // 바깥 발광 아크
+    const [ax2, ay2] = at(0.08);   // 눈금 링·블록
+    const [ax3, ay3] = at(0.10);   // 점선 링
+    const [ax4, ay4] = at(0.12);   // 진행 아크
+    const [ex, ey] = at(0.17);     // 안쪽 발광·다이아몬드
+    const [px, py] = at(0.21);     // 중심 광점 (가장 많이 움직임)
+    // 옆·위아래를 볼 때 다이아몬드가 살짝 좁아져 고개를 돌린 느낌
+    const turnX = 1 - Math.min(0.16, Math.abs(State.lookX) * 0.16);
+    const turnY = 1 - Math.min(0.10, Math.abs(State.lookY) * 0.10);
+
+    // 베젤 위 발광 아크
+    c.save(); c.translate(ax1, ay1); c.rotate(spinB);
+    c.shadowColor = rgba(accent, 0.9); c.shadowBlur = 10;
+    c.strokeStyle = rgba(accent, 0.85); c.lineWidth = 2;
+    c.beginPath(); c.arc(0, 0, R * 0.865, -0.3, 1.2); c.stroke();
+    c.beginPath(); c.arc(0, 0, R * 0.865, Math.PI - 0.2, Math.PI + 0.7); c.stroke();
+    c.restore();
+
+    // 미세 눈금 링 (회전)
+    c.save(); c.translate(ax2, ay2); c.rotate(-spinA * 0.4);
+    for (let i = 0; i < 144; i++) {
+      const a = (i / 144) * Math.PI * 2;
+      const l = i % 12 === 0 ? R * 0.04 : R * 0.02;
+      c.beginPath();
+      c.moveTo(Math.cos(a) * R * 0.69, Math.sin(a) * R * 0.69);
+      c.lineTo(Math.cos(a) * (R * 0.69 - l), Math.sin(a) * (R * 0.69 - l));
+      c.strokeStyle = rgba(accent, i % 12 === 0 ? 0.7 : 0.3); c.lineWidth = 1; c.stroke();
+    }
+    // 블록 세그먼트
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      c.beginPath(); c.arc(0, 0, R * 0.635, a, a + 0.32);
+      c.strokeStyle = rgba(accent, 0.5); c.lineWidth = R * 0.018; c.stroke();
+    }
+    c.restore();
+
+    // 점선 링
+    c.save(); c.translate(ax3, ay3); c.rotate(spinA * 0.6);
+    c.setLineDash([2, 5]); c.strokeStyle = rgba(accent, 0.45); c.lineWidth = 1.2;
+    c.beginPath(); c.arc(0, 0, R * 0.6, 0, Math.PI * 2); c.stroke();
+    c.setLineDash([]);
+    c.restore();
+
+    // 진행 아크 (상태에 따라 속도/길이)
+    const prog = m === "THINK" ? 0.55 + Math.sin(t * 3) * 0.25 : 0.72;
+    c.save(); c.translate(ax4, ay4); c.rotate(spinA);
+    c.shadowColor = rgba(accent, 1); c.shadowBlur = 8;
+    c.strokeStyle = rgba(accent, 0.9); c.lineWidth = R * 0.016; c.lineCap = "round";
+    c.beginPath(); c.arc(0, 0, R * 0.565, 0, Math.PI * 2 * prog); c.stroke();
+    c.restore();
+
+    // 눈 뒤 부드러운 발광 (텍스처 없음)
+    const L = R * 0.54;
+    const ch = c.createRadialGradient(ex, ey, 0, ex, ey, L);
+    ch.addColorStop(0, rgba(accent, 0.22));
+    ch.addColorStop(0.6, rgba(accent, 0.06));
+    ch.addColorStop(1, rgba(accent, 0));
+    c.fillStyle = ch; c.beginPath(); c.arc(ex, ey, L, 0, Math.PI * 2); c.fill();
+
+    c.save(); c.translate(ex, ey); c.scale(turnX, turnY); c.translate(-ex, -ey);
+    // 스플릿 다이아몬드 (둥근 모서리 + 내부 홀로그램 결)
+    const glow = eyeGlow(t);
+    const gk = Math.min(1.35, 0.7 + glow * 0.35);
+    // 다이아몬드를 가로지르는 빛줄기: 말할 때 빠르게, 들을 때 느리게
+    const sweepSpeed = m === "SPEAK" ? 1.3 : m === "LISTEN" ? 0.45 : m === "THINK" ? 0.3 : 0.12;
+    const sweep = (t * sweepSpeed) % 1.6;          // 0~1 구간에서만 보임, 나머지는 쉬는 시간
+    const pulseK = m === "SPEAK" ? 1 + Math.sin(t * 16) * 0.05 + State.energy * 0.04
+                 : m === "THINK" ? 1 + Math.sin(t * 8) * 0.03 : 1 + Math.sin(t * 2.4) * 0.015;
+    const dH = R * 0.47 * pulseK, dW = R * 0.4 * pulseK, gap = R * 0.035, inr = 0.4;
+    const rO = R * 0.06, rI = R * 0.025;
+    const half = (s) => [
+      [s * gap, -dH], [s * dW, 0], [s * gap, dH],
+      [s * gap, dH * inr], [s * dW * inr, 0], [s * gap, -dH * inr]
+    ];
+    const radii = [rO * 0.5, rO, rO * 0.5, rI, rI, rI];
+    for (const s of [-1, 1]) {
+      const pts = half(s).map(([x, y]) => [ex + x, ey + y]);
+      // 발광 채움
+      c.save();
+      roundedPoly(c, pts, radii);
+      const fg = c.createLinearGradient(ex, ey - dH, ex + s * dW, ey + dH);
+      fg.addColorStop(0, rgba(accent, Math.min(0.85, 0.55 * gk)));
+      fg.addColorStop(0.5, rgba(accent, Math.min(0.6, 0.28 * gk)));
+      fg.addColorStop(1, rgba(accent, Math.min(0.8, 0.5 * gk)));
+      c.shadowColor = rgba(accent, 1); c.shadowBlur = 14 + glow * 22;
+      c.fillStyle = fg; c.fill();
+      c.shadowBlur = 0;
+      c.clip();
+      // 유리 하이라이트
+      const hl = c.createLinearGradient(ex, ey - dH, ex, ey);
+      hl.addColorStop(0, "rgba(255,255,255,0.28)"); hl.addColorStop(1, "rgba(255,255,255,0)");
+      c.fillStyle = hl; c.fillRect(ex - dW, ey - dH, dW * 2, dH * 0.8);
+      if (sweep < 1) {
+        const sxp = ex - dW * 1.4 + sweep * dW * 2.8;
+        const band = c.createLinearGradient(sxp - dW * 0.35, ey - dH, sxp + dW * 0.35, ey + dH);
+        const sa = (m === "SPEAK" ? 0.5 + State.energy * 0.35 : m === "LISTEN" ? 0.35 : 0.18) * Math.sin(sweep * Math.PI);
+        band.addColorStop(0, "rgba(255,255,255,0)"); band.addColorStop(0.5, `rgba(235,250,255,${sa})`); band.addColorStop(1, "rgba(255,255,255,0)");
+        c.globalCompositeOperation = "lighter";
+        c.fillStyle = band; c.fillRect(ex - dW * 1.5, ey - dH, dW * 3, dH * 2);
+        c.globalCompositeOperation = "source-over";
+      }
+      c.restore();
+      // 테두리
+      roundedPoly(c, pts, radii);
+      c.strokeStyle = rgba(accent.map((v) => Math.min(255, v + 70)), 0.95);
+      c.lineWidth = 2;
+      c.shadowColor = rgba(accent, 1); c.shadowBlur = 12;
+      c.stroke();
+      c.shadowBlur = 0;
+    }
+
+    c.restore();
+
+    // 중심 다이아몬드 광점
+    const cs = R * 0.045 * (0.85 + glow * 0.3);
+    const haloR = cs * (3.5 + glow * 2.5);
+    const cg = c.createRadialGradient(px, py, 0, px, py, haloR);
+    cg.addColorStop(0, rgba(accent, Math.min(1, 0.55 + glow * 0.3))); cg.addColorStop(1, rgba(accent, 0));
+    c.fillStyle = cg; c.beginPath(); c.arc(px, py, haloR, 0, Math.PI * 2); c.fill();
+    c.save(); c.translate(px, py); c.rotate(Math.PI / 4);
+    c.shadowColor = "#fff"; c.shadowBlur = 10 + glow * 14;
+    c.fillStyle = "#ffffff"; c.fillRect(-cs / 2, -cs / 2, cs, cs);
+    c.restore();
+
+    drawBokeh(c, w, h, t, true);
+  }
+
+  function drawPulse(t) {
+    const { w, h, dpr } = fit(pulse);
+    px2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    px2.clearRect(0, 0, w, h);
+    const m = State.mode;
+    const amp = m === "THINK" ? 0.38 : m === "SPEAK" ? 0.3 : m === "ALERT" ? 0.42 : 0.12;
+    px2.strokeStyle = rgba(accent, 0.85);
+    px2.lineWidth = 1;
+    px2.beginPath();
+    for (let x = 0; x <= w; x += 2) {
+      const k = x / w;
+      const y = h / 2 + Math.sin(k * 18 + t * 4) * Math.sin(k * 3.1 - t * 1.3) * h * amp;
+      x === 0 ? px2.moveTo(x, y) : px2.lineTo(x, y);
+    }
+    px2.stroke();
+    px2.fillStyle = rgba(INK, 0.12);
+    px2.fillRect(0, h / 2, w, 1);
+  }
+
+  function loop(now) {
+    const t = now / 1000;
+    const dt = Math.min(0.05, last ? t - last : 0);
+    last = t;
+    drawCore(t, dt);
+    drawPulse(t);
+    requestAnimationFrame(loop);
+  }
+  /* ==========================================================================
+   * 5. 부팅
+   * ======================================================================== */
+  loadBrowserConfig();
+  refreshLink();
+  requestAnimationFrame(loop);
+  Native.post({ cmd: "ready" });
+
+  (async () => {
+    await sleep(500);
+    const boot = addEntry("ghost", "", "부팅");
+    await Link.probe(); refreshLink();
+    const OPENING = "어서오세요. 기다리고 있었어요. 오늘은 어떤 여정이 우릴 기다리고 있나요?";
+    const msg = Link.ready || Config.mode === "LOCAL"
+      ? OPENING
+      : OPENING + "\n(링크가 아직 안 붙어서 당분간은 짧게만 얘기할게요. 붙으면 바로 알려 줄게요.)";
+    setState("SPEAK");
+    await typeOut(boot.body, msg);
+    setState("IDLE");
+    input.focus();
+  })();
+  </script>
+</body>
+</html>
