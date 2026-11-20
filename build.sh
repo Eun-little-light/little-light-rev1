@@ -52,6 +52,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 echo "› sign (ad-hoc)"
+# iCloud 동기화 폴더(바탕화면·문서)나 Finder가 붙인 확장 속성이 있으면 서명이 거부되므로 먼저 제거
+xattr -cr "$APP"
 codesign --force --deep -s - "$APP"
 rm -rf .build-tmp
 echo "✓ built: $APP"
