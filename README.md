@@ -26,6 +26,12 @@
 - 16GB Mac 기준: 앱이 켜질 때 모델을 미리 불러 두므로, 대답은 보통 2~8초 뒤 흘러나오기 시작합니다 (세계관 질문은 참고 항목을 읽느라 조금 더 걸림).
   메모리를 많이 쓰는 앱을 닫으면 빨라집니다. 더 가볍게 쓰려면 `ollama pull qwen3:4b` 후 모델을 바꾸세요.
 
+## Claude 대체
+로컬 LLM이 꺼져 있거나 오류가 나거나 "잘 모르겠어요"라고 하면, 이 Mac의 **Claude**가 같은 고스트 말투로 대신 대답합니다. "클로드"라고 부르면 바로 Claude에게 물어요.
+- 필요: [Claude Code](https://docs.claude.com/en/docs/claude-code) 설치 후 `claude` 명령이 claude.ai 계정으로 로그인되어 있을 것
+- Claude 대답은 그 계정의 **사용 한도(Pro 등)에서 차감**됩니다. `⌘ ,` 링크 설정에서 `Claude 대체`를 끌 수 있어요
+- Claude는 대답만 합니다(도구 없음). Mac 제어는 로컬 LLM이 맡아요
+
 ## 할 수 있는 일 (Mac 제어)
 앱 열기 · 웹 검색(구글/유튜브/나무위키) · 링크 열기 · 시스템 정보 · 볼륨 · 밝기 · 다크 모드 · 메모 · 미리 알림 · 타이머
 - **다른 앱 직접 조작** ([vercel-labs/agent-desktop](https://github.com/vercel-labs/agent-desktop) 연동): 앱 화면(접근성 트리)을 읽고 버튼 클릭·글 입력·키 입력

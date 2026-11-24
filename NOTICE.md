@@ -11,10 +11,12 @@
 | agent-desktop (Vercel Labs) | 다른 앱 화면 읽기·클릭·입력 (접근성 API) | Apache-2.0 | https://github.com/vercel-labs/agent-desktop |
 | Ollama | 로컬 LLM 실행 서버 | MIT | https://github.com/ollama/ollama |
 | Qwen3 (qwen3:8b) | 기본 대화 모델 | Apache-2.0 | https://ollama.com/library/qwen3 |
+| Claude Code (Anthropic) | 로컬이 대답하지 못할 때 대신 대답 (`claude -p`) | Anthropic 이용약관 | https://docs.claude.com/en/docs/claude-code |
 
 - agent-desktop은 포크하거나 수정하지 않았습니다. 작은 빛은 설치된 `agent-desktop` CLI를 별도 프로세스로 실행해
   그 JSON 출력만 사용합니다(`mac/main.swift`의 `Desktop`). agent-desktop의 저작권은 Vercel Labs에 있습니다.
 - Ollama와 Qwen3도 수정 없이 로컬 HTTP API(`/api/chat`, `/api/tags`)로만 사용합니다.
+- Claude Code는 사용자가 설치하고 claude.ai 계정으로 로그인한 `claude` CLI를 그대로 실행합니다. Claude 대답은 그 계정의 사용 한도(Pro 등)에서 차감됩니다.
 
 ## 참고 자료
 

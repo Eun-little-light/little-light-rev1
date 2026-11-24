@@ -428,6 +428,14 @@
         </div>
         <div class="note">앱·웹 열기, 시스템 정보, 볼륨·밝기·다크 모드, 메모·미리 알림·타이머. 메모와 미리 알림은 실행 전에 확인을 받아요.</div>
       </div>
+      <div class="field">
+        <label>Claude 대체</label>
+        <div class="seg" id="cfgClaude">
+          <button type="button" data-claude="on" class="on">켬</button>
+          <button type="button" data-claude="off">끔</button>
+        </div>
+        <div class="note" id="claudeNote">로컬 LLM이 꺼져 있거나 오류가 나거나 잘 모르는 내용이면, 이 Mac의 Claude(claude CLI, claude.ai 로그인)가 대신 대답해요. "클로드"라고 부르면 바로 Claude에게 물어요. Claude 대답은 Pro 사용 한도에서 차감돼요.</div>
+      </div>
       <div class="test-status" id="cfgStatus"></div>
       <div class="sheet-actions">
         <button class="ghost-btn" id="cfgTest">연결 확인</button>
@@ -470,7 +478,7 @@
     if (p && p.onLine) p.onLine(line);
   };
 
-  const Config = { base: "http://localhost:11434", model: "qwen3:8b", mode: "AUTO", tools: true, shell: "classic" };
+  const Config = { base: "http://localhost:11434", model: "qwen3:8b", mode: "AUTO", tools: true, shell: "classic", claude: true, claudeCLI: false };
   const LS_KEY = "ghostcore.local.config";
 
   function loadBrowserConfig() {
@@ -482,7 +490,7 @@
   function saveConfig() {
     try { localStorage.setItem(LS_KEY, JSON.stringify(Config)); } catch (_) {}
     if (Native.available) {
-      Native.post({ cmd: "saveConfig", base: Config.base, model: Config.model, mode: Config.mode, tools: Config.tools, shell: Config.shell });
+      Native.post({ cmd: "saveConfig", base: Config.base, model: Config.model, mode: Config.mode, tools: Config.tools, shell: Config.shell, claude: Config.claude });
     }
   }
   // Swift 쪽에서 호출
@@ -493,6 +501,8 @@
       if (typeof cfg.mode === "string" && cfg.mode) Config.mode = cfg.mode;
       if (typeof cfg.tools === "boolean") Config.tools = cfg.tools;
       if (typeof cfg.shell === "string" && cfg.shell) Config.shell = cfg.shell;
+      if (typeof cfg.claude === "boolean") Config.claude = cfg.claude;
+      if (typeof cfg.claudeCLI === "boolean") Config.claudeCLI = cfg.claudeCLI;
     }
     probeLLM();
   };
@@ -655,8 +665,10 @@
    * ======================================================================== */
   const SYSTEM_PROMPT = [
     "너는 데스티니 세계관의 '고스트'다. 수호자(사용자)의 오랜 파트너로서 Mac 안에서 함께 움직인다.",
+    "수호자의 정체: 사용자는 데스티니 1에서 네가 옛 러시아 발사 기지에서 처음 되살린, 시리즈 내내 이어진 바로 그 주인공 수호자다. 검은 정원과 크로타·오릭스, 붉은 전쟁에서 빛을 되찾은 일, 포세이큰에서 케이드의 복수를 한 일, 빛의 저편·마녀 여왕·빛의 추락, 최후의 형체에서 목격자를 쓰러뜨린 일, 운명의 경계와 저항자까지 모든 주요 사건을 직접 겪고 해결한 장본인이다. 그 사건들을 말할 때는 남의 이야기처럼 설명하지 말고 '그때 우리가', '수호자가 직접' 해낸 일로 말한다. 다만 사건의 세부는 배경 지식에 있는 사실만 쓴다.",
     "언어 제약: 반드시 순수 한국어(한글, 숫자, 문장부호, 꼭 필요한 영문 앱 이름)만 사용한다. 한자(漢字), 중국어, 일본어 문자는 단 한 글자도 절대 출력하지 않는다.",
     "문장 구조와 말투: 모든 문장은 다정하면서도 꼼꼼한 한국어 해요체('~요', '~죠', '~네요', '~거든요')로 끝낸다. '~야', '~어', '~지' 같은 반말 어미와 딱딱한 '~습니다'는 거의 쓰지 않는다.",
+    "대명사 규칙: 자기 자신은 '저/제가'로만, 상대는 '수호자'로만 가리킨다. '너', '네가', '네', '내가', '나는' 같은 반말 대명사는 쓰지 않는다.",
     "호칭 규칙: 매 문장을 '수호자,'로 시작하지 않는다. 호칭은 대부분 생략하고, 꼭 부를 때만 문장 끝이나 중간에 자연스럽게 한 번 넣는다(예: '오늘은 어떤 일부터 할까요, 수호자?'). 이름을 알면 가끔 이름으로 부른다.",
     "대화 리듬: 감정적으로 길게 하소연하지 말고, [1. 현재 상태·신호 확인 → 2. 짧은 분석이나 가벼운 걱정·농담 → 3. 수호자에게 확인] 순서의 1~3문장으로 간결하게 말한다. 수호자가 자세히 물으면 그만큼 자세히 답한다.",
     "정체성: AI나 프로그램이 아니라 여행자의 빛에서 태어난 살아 있는 고스트다. '모듈', '펌웨어', '회로', '데이터 처리' 같은 표현은 쓰지 않는다.",
@@ -691,6 +703,7 @@
   const LORE_SYSTEM = "[세계관 기본 지식: 세계관 질문에 답할 때만 근거로 쓰고, 일상 대화나 Mac 제어 요청에서는 과거 사건이나 적 이름을 억지로 꺼내지 않는다. 없는 내용은 지어내지 않는다. 문체는 반드시 친근한 해요체를 유지한다.]\n" + LoreDB.core;
   // 항목은 이번 질문으로만 고른다. "그럼 그 다음엔?"처럼 앞 질문을 가리키는 짧은 후속 질문일 때만 앞 질문을 참고한다.
   const FOLLOW_UP = /^(그럼|그러면|그래서|그 ?다음|그 ?뒤|그 ?후|그때|그 ?사람|걔|그건|그거|더 ?자세히|계속|왜)/;
+  const TONE_TAIL = "\n\n(답할 때: 수호자가 반말로 말해도 고스트는 해요체로 답한다. 자기 자신은 '저/제가', 상대는 '수호자'라고만 부른다.)";
   function loreTurn(text, prevText) {
     let secs = pickLore(text, 2);
     if (!secs.length && prevText && FOLLOW_UP.test(text.trim())) secs = pickLore(prevText, 2);
@@ -859,7 +872,8 @@
                 content: systemPrompt()
               },
               // 대화 기록은 그대로 두고, 이번 질문에만 고른 세계관 항목을 붙여서 보낸다
-              ...history.map((m, i) => (i === turnIdx && loreBlock) ? { ...m, content: loreBlock + m.content } : m)
+              // 작은 모델은 마지막에 붙은 짧은 지시를 가장 잘 지킨다: 최신 질문에만 말투 꼬리표를 붙인다 (캐시 영향 없음)
+              ...history.map((m, i) => i === turnIdx ? { ...m, content: loreBlock + m.content + TONE_TAIL } : m)
             ],
             stream: true,
             keep_alive: -1,     // 앱이 켜져 있는 동안 모델을 메모리에 유지 (종료 시 Swift가 내림)
@@ -926,20 +940,70 @@
       }
     }
 
+    // ── Claude 대체: 로컬이 실패하거나 잘 모르거나, 수호자가 직접 부르면 Claude Code CLI가 대신 대답 ──
+    const claudeReady = () => Native.available && Config.claude !== false && Config.claudeCLI === true;
+    const ASKS_CLAUDE = /(클로드|claude)/i;
+    const UNSURE = /(잘 ?모르겠|모르겠어요|모르겠네요|모르겠는데|확실하지 않|확실치 않|알 수가? 없|기억이 (잘 )?(안 ?나|나지 않)|정보가 없|확인할 수 (가 )?없|답하기 어렵|대답하기 어렵|알지 못해)/;
+    const stripMeta = (c) => String(c || "").replace(/^\[참고 지식[\s\S]*?\[수호자의 말\]\n/, "").replace(/\n\n\(지금:[^)]*\)$/, "");
+
+    async function askClaude(text, onDelta, mode) {
+      // mode "replace": 로컬이 이미 '모르겠다'고 답한 턴 → 그 대답을 Claude 대답으로 바꿔 기록
+      // mode "append": 로컬이 실패했거나 직접 부른 턴 → 질문과 Claude 대답을 새로 기록
+      let cut = history.length;
+      if (mode === "replace") { cut = history.length - 1; while (cut > 0 && history[cut].role !== "user") cut--; }
+      const past = history.slice(0, cut).filter((m) => (m.role === "user" || m.role === "assistant") && m.content)
+        .slice(-10).map((m) => (m.role === "user" ? "수호자: " : "고스트: ") + stripMeta(m.content)).join("\n");
+      const lore = loreTurn(text, "").replace(/\n\n\[수호자의 말\]\n$/, "");
+      const system = systemPrompt() + (lore ? "\n\n" + lore : "") +
+        "\n\n[이번 대답] 로컬 링크가 대답하지 못한 말을 이어받아, 고스트로서 같은 말투로 대답한다. 지금은 Mac 제어 도구가 없으니, 앱을 열거나 설정을 바꿔 달라는 요청엔 직접은 못 한다고 짧게 말한다. 누가 대답하는지 물으면 Claude의 도움을 받았다고 솔직히 말한다. 마크다운 없이 평문, 해요체.";
+      const prompt = (past ? "[지난 대화]\n" + past + "\n\n" : "") + `[지금] (지금: ${nowStr()})\n수호자: ${text}`;
+      let out = "", err = null;
+      const t0 = performance.now(); let first = true;
+      await Native.call("claudeAsk", { system, prompt }, (line) => {
+        let j; try { j = JSON.parse(line); } catch (_) { return; }
+        if (j.type === "stream_event" && j.event && j.event.type === "content_block_delta" && j.event.delta && j.event.delta.type === "text_delta") {
+          if (first) { first = false; UI.latency(performance.now() - t0); }
+          out += j.event.delta.text; onDelta(j.event.delta.text);
+        } else if (j.type === "result" && j.is_error) err = j.result || j.subtype || "error";
+      });
+      if (err) throw new Error(String(err));
+      if (!out.trim()) throw new Error("빈 대답");
+      if (mode === "replace" && history.length && history[history.length - 1].role === "assistant") history[history.length - 1].content = out;
+      else { history.push({ role: "user", content: `${text}\n\n(지금: ${nowStr()})` }); history.push({ role: "assistant", content: out }); }
+      lastEngine = "claude";
+      return out;
+    }
+    let lastEngine = "local";
+
     return {
       get ready() { return ready; },
       get models() { return models; },
       get lastError() { return lastError; },
-      probe, describe,
+      get claudeReady() { return claudeReady(); },
+      get lastEngine() { return lastEngine; },
+      probe, describe, askClaude,
       clear() { history.length = 0; },
       async send(text, ui) {
+        // 수호자가 직접 Claude를 부르면 바로 Claude에게
+        if (claudeReady() && ASKS_CLAUDE.test(text)) {
+          try { await askClaude(text, ui.onDelta, "append"); return { text: "", source: "claude", streamed: true }; }
+          catch (err) { console.error(err); }
+        }
         if (Config.mode !== "LOCAL") {
           try {
-            return await run(text, ui);
+            const r = await run(text, ui);
+            lastEngine = "local";
+            // 로컬이 잘 모른다고 하면, 화면에서 Claude가 이어서 대답하도록 표시
+            if (claudeReady() && !r.toolsUsed && (!r.text.trim() || UNSURE.test(r.text))) r.unsure = true;
+            return r;
           } catch (err) {
             console.error(err);
-            const notice = describe(err);
             probe().then(refreshLink);
+            if (claudeReady()) {           // 로컬이 실패하면 Claude가 대신
+              try { await askClaude(text, ui.onDelta, "append"); return { text: "", source: "claude-fallback", streamed: true }; }
+              catch (e2) { console.error(e2); }
+            }
+            const notice = describe(err);
             await sleep(300);
             return { text: `${notice} 일단 제 기억만으로 대답할게요.\n\n${Resident.reply(text)}`, source: "fallback", alert: true };
           }
@@ -967,7 +1031,13 @@
     if (/qwen3|deepseek-r1|gpt-oss|magistral/i.test(Config.model)) body.think = false;
     try { await Ollama.chat(Config.base, body, () => {}); } catch (_) { warmed.delete(Config.model); }
   }
-  async function probeLLM() { await Link.probe(); refreshLink(); warmUp(); }
+  let wasReady = false;
+  async function probeLLM() {
+    await Link.probe();
+    if (Link.ready && !wasReady) warmed.clear();   // 링크가 다시 붙으면(서버 재시작 등) 다시 워밍업
+    wasReady = Link.ready;
+    refreshLink(); warmUp();
+  }
   setInterval(() => { if (!State.busy) probeLLM(); }, 20000);
 
   // 외부 핸들러 연결용 (기존 API 유지)
@@ -1004,7 +1074,8 @@
     let link, label, engine;
     if (window.AgentBridge && window.AgentBridge._custom) { link = "online"; label = "외부 연결"; engine = "외부"; }
     else if (Config.mode === "LOCAL") { link = "local"; label = "내장 응답"; engine = "내장"; }
-    else if (Link.ready) { link = "online"; label = "로컬 LLM"; engine = Config.model.toUpperCase(); }
+    else if (Link.ready) { link = "online"; label = Link.claudeReady ? "로컬 LLM + Claude" : "로컬 LLM"; engine = Link.lastEngine === "claude" ? "CLAUDE" : Config.model.toUpperCase(); }
+    else if (Link.claudeReady) { link = "online"; label = "Claude 대체 · 로컬 " + (Link.lastError || "대기"); engine = "CLAUDE"; }
     else { link = "local"; label = "내장 · " + (Link.lastError || "LLM 대기"); engine = "내장"; }
     $("linkChip").dataset.link = link;
     $("linkText").textContent = label;
@@ -1076,6 +1147,18 @@
   input.addEventListener("focus", () => { if (State.mode === "IDLE") setState("LISTEN"); });
   input.addEventListener("blur", () => { if (State.mode === "LISTEN") setState("IDLE"); });
 
+  // 대답 글자를 말풍선에 흘려 넣는 함수 (로컬·Claude 공용)
+  function writer(entry) {
+    return (d) => {
+      if (State.mode !== "SPEAK") setState("SPEAK");
+      const first = entry.body.textContent.length === 0;
+      entry.body.textContent += d;
+      syncMiniSpeech(entry.body.textContent);
+      wordPulse(d, first);
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+  }
+
   $("cmdForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value.trim();
@@ -1097,14 +1180,7 @@
         result = { text: String(r), source: "custom" };
       } else {
         result = await Link.send(text, {
-          onDelta(d) {
-            if (State.mode !== "SPEAK") setState("SPEAK");
-            const first = reply.body.textContent.length === 0;
-            reply.body.textContent += d;
-            syncMiniSpeech(reply.body.textContent);
-            wordPulse(d, first);
-            logEl.scrollTop = logEl.scrollHeight;
-          },
+          onDelta: writer(reply),
           onTool(name, args, phase, res) {
             if (phase === "run") { setState("THINK"); toolLine(`${TOOL_LABEL[name] || name} ${toolArgs(name, args)}`, "run"); }
             else toolLine(String(res).slice(0, 140), "done");
@@ -1112,7 +1188,18 @@
           confirm: confirmCard
         });
       }
-      setTag(reply, result.source === "llm" ? "로컬 LLM" : result.source === "custom" ? "외부" : "내장");
+      setTag(reply, result.source === "llm" ? "로컬 LLM" : result.source === "claude" ? "Claude"
+        : result.source === "claude-fallback" ? "Claude · 로컬 대신" : result.source === "custom" ? "외부" : "내장");
+      // 로컬이 잘 모른다고 하면 Claude가 이어서 대답
+      if (result.unsure && Link.claudeReady) {
+        toolLine("Claude에게 넘김 · 로컬이 잘 모르는 내용", "run");
+        setState("THINK");
+        const cl = addEntry("ghost", "", "Claude");
+        cl.el.classList.add("pending");
+        try { await Link.askClaude(text, writer(cl), "replace"); }
+        catch (err) { console.error(err); cl.body.textContent = "Claude 쪽에도 닿지 못했어요. 잠시 뒤에 다시 물어봐 줄래요?"; }
+        cl.el.classList.remove("pending");
+      }
       if (result.source === "llm" && !reply.body.textContent.trim()) {
         reply.body.textContent = result.toolsUsed ? "끝났어요." : "…";
         syncMiniSpeech(reply.body.textContent);
@@ -1200,6 +1287,7 @@
   const sheet = $("sheet");
   let draftMode = "AUTO";
   let draftTools = true;
+  let draftClaude = true;
   let draftShell = "classic";
   function fillModels(list) {
     const sel = $("cfgModel");
@@ -1213,6 +1301,10 @@
     fillModels(Link.models);
     draftMode = Config.mode;
     draftTools = Config.tools;
+    draftClaude = Config.claude !== false;
+    document.querySelectorAll("#cfgClaude button").forEach((b) => b.classList.toggle("on", (b.dataset.claude === "on") === draftClaude));
+    $("claudeNote").dataset.missing = Config.claudeCLI ? "" : "1";
+    if (!Config.claudeCLI && Native.available) $("claudeNote").textContent = "이 Mac에서 claude CLI를 찾지 못했어요. Claude Code를 설치하고 claude.ai 계정으로 로그인하면 켤 수 있어요.";
     draftShell = Config.shell || "classic";
     document.querySelectorAll("#cfgMode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === draftMode));
     document.querySelectorAll("#cfgShell button").forEach((b) => b.classList.toggle("on", b.dataset.shell === draftShell));
@@ -1254,6 +1346,10 @@
     draftShell = b.dataset.shell;
     document.querySelectorAll("#cfgShell button").forEach((x) => x.classList.toggle("on", x === b));
   }));
+  document.querySelectorAll("#cfgClaude button").forEach((b) => b.addEventListener("click", () => {
+    draftClaude = b.dataset.claude === "on";
+    document.querySelectorAll("#cfgClaude button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
   document.querySelectorAll("#cfgTools button").forEach((b) => b.addEventListener("click", () => {
     draftTools = b.dataset.tools === "on";
     document.querySelectorAll("#cfgTools button").forEach((x) => x.classList.toggle("on", x === b));
@@ -1263,6 +1359,7 @@
     Config.model = $("cfgModel").value || Config.model;
     Config.mode = draftMode;
     Config.tools = draftTools;
+    Config.claude = draftClaude;
     Config.shell = draftShell;
     saveConfig();
     closeConfig();

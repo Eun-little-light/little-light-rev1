@@ -289,6 +289,16 @@ enum Desktop {
     }
 }
 
+// MARK: - Claude 대체 (Claude Code CLI를 사용자의 claude.ai 로그인으로 실행)
+
+enum ClaudeCLI {
+    static var bin: String? {
+        ["/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+         NSHomeDirectory() + "/.local/bin/claude", NSHomeDirectory() + "/.claude/local/claude"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+}
+
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
@@ -414,6 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "saveConfig":
             for k in ["base", "model", "mode"] { if let v = body[k] as? String { defaults.set(v, forKey: "llm" + k.capitalized) } }
             if let t = body["tools"] as? Bool { defaults.set(t, forKey: "llmTools") }
+            if let c = body["claude"] as? Bool { defaults.set(c, forKey: "llmClaude") }
             ollama.ensureRunning(base: base)
         case "toggleFullscreen":
             window.toggleFullScreen(nil)
@@ -425,6 +436,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             httpGet(id, body["url"] as? String ?? "")
         case "httpStream":
             httpStream(id, body["url"] as? String ?? "", body["body"] as? String ?? "")
+        case "claudeAsk":
+            claudeAsk(id, system: body["system"] as? String ?? "", prompt: body["prompt"] as? String ?? "")
         case "tool":
             let name = body["name"] as? String ?? ""
             let args = body["args"] as? [String: Any] ?? [:]
@@ -434,12 +447,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
+    /// 로컬 LLM이 대답하지 못할 때 Claude Code CLI로 대신 묻는다. 도구는 모두 끄고(대답만),
+    /// 세션은 저장하지 않으며, 사용자 설정·훅은 읽지 않는다. 출력은 stream-json 한 줄씩 페이지로 전달.
+    func claudeAsk(_ id: Int, system: String, prompt: String) {
+        guard let bin = ClaudeCLI.bin else { reply(id, false, "claude CLI가 설치되어 있지 않다."); return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: bin)
+            p.arguments = ["-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
+                           "--tools", "", "--system-prompt", system,
+                           "--no-session-persistence", "--setting-sources", ""]
+            p.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
+            p.environment = env
+            let out = Pipe(), err = Pipe(), inp = Pipe()
+            p.standardOutput = out; p.standardError = err; p.standardInput = inp
+            var errData = Data()
+            let errLock = NSLock()
+            err.fileHandleForReading.readabilityHandler = { h in
+                let d = h.availableData
+                errLock.lock(); errData.append(d); errLock.unlock()
+            }
+            do { try p.run() } catch {
+                self.reply(id, false, "claude 실행 실패: \(error.localizedDescription)"); return
+            }
+            inp.fileHandleForWriting.write(Data(prompt.utf8))
+            try? inp.fileHandleForWriting.close()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 120) { if p.isRunning { p.terminate() } }
+
+            var buf = Data()
+            let fh = out.fileHandleForReading
+            func emitLines() {
+                while let r = buf.firstRange(of: Data([0x0A])) {
+                    let line = buf.subdata(in: buf.startIndex..<r.lowerBound)
+                    buf.removeSubrange(buf.startIndex..<r.upperBound)
+                    if let s = String(data: line, encoding: .utf8), !s.isEmpty { self.js("window.__nativeLine", [id, s]) }
+                }
+            }
+            while true {
+                let d = fh.availableData
+                if d.isEmpty { break }
+                buf.append(d); emitLines()
+            }
+            if !buf.isEmpty, let s = String(data: buf, encoding: .utf8), !s.isEmpty { self.js("window.__nativeLine", [id, s]) }
+            p.waitUntilExit()
+            err.fileHandleForReading.readabilityHandler = nil
+            errLock.lock(); let errText = String(data: errData, encoding: .utf8) ?? ""; errLock.unlock()
+            let ok = p.terminationStatus == 0
+            self.reply(id, ok, ok ? "" : String(errText.suffix(300)))
+        }
+    }
+
     func pushConfig() {
         let cfg: [String: Any] = [
             "base": base,
             "model": defaults.string(forKey: "llmModel") ?? "qwen3:8b",
             "mode": defaults.string(forKey: "llmMode") ?? "AUTO",
             "tools": defaults.object(forKey: "llmTools") as? Bool ?? true,
+            "claude": defaults.object(forKey: "llmClaude") as? Bool ?? true,
+            "claudeCLI": ClaudeCLI.bin != nil,
         ]
         js("window.__applyNativeConfig", [cfg])
     }
