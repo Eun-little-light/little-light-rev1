@@ -691,15 +691,18 @@
       .slice(0, limit)
       .map((x) => x.sec);
   }
-  function loreContext(text) {
-    const secs = pickLore(text);
-    const isLoreQuery = secs.length > 0 || /(데스티니|여행자|어둠|빛|선봉대|사바툰|목격자|케이드|자발라|아이코라|붕괴|황금기|탑|도시)/.test(text);
-    if (!isLoreQuery) {
-      return "[대화 집중] 일상 대화나 Mac 제어 요청에서는 과거 확장팩 사건이나 적 이름을 억지로 꺼내지 말고 현재 대화에만 집중한다.";
-    }
-    let out = "[배경 지식: 세계관 질문에 답할 때만 아래 사실을 근거로 사용하고, 없는 내용은 지어내지 않는다. 문체는 반드시 친근한 해요체를 유지한다.]\n" + LoreDB.core;
-    for (const sec of secs) out += `\n\n[${sec.title}]\n${sec.text}`;
-    return out;
+  // 지시문은 매번 똑같아야 Ollama가 앞부분을 캐시해 재사용한다(대화가 길어져도 새로 읽을 부분만 처리).
+  // 그래서 세계관 기본 연대표는 고정 지시문에 두고, 질문마다 고른 세부 항목은 '최신 질문'에만 붙인다.
+  const LORE_SYSTEM = "[세계관 기본 지식: 세계관 질문에 답할 때만 근거로 쓰고, 일상 대화나 Mac 제어 요청에서는 과거 사건이나 적 이름을 억지로 꺼내지 않는다. 없는 내용은 지어내지 않는다. 문체는 반드시 친근한 해요체를 유지한다.]\n" + LoreDB.core;
+  // 항목은 이번 질문으로만 고른다. "그럼 그 다음엔?"처럼 앞 질문을 가리키는 짧은 후속 질문일 때만 앞 질문을 참고한다.
+  const FOLLOW_UP = /^(그럼|그러면|그래서|그 ?다음|그 ?뒤|그 ?후|그때|그 ?사람|걔|그건|그거|더 ?자세히|계속|왜)/;
+  function loreTurn(text, prevText) {
+    let secs = pickLore(text, 2);
+    if (!secs.length && prevText && FOLLOW_UP.test(text.trim())) secs = pickLore(prevText, 2);
+    if (!secs.length) return "";
+    let out = "[참고 지식: 이번 질문에만 해당. 관련 있을 때만 근거로 쓰고 해요체로 답한다]";
+    for (const sec of secs) out += `\n[${sec.title}] ${sec.text}`;
+    return out + "\n\n[수호자의 말]\n";
   }
 
   // ── Mac 제어 도구 정의 (Ollama tools 형식) ──
@@ -840,6 +843,9 @@
         history.shift();
         while (history.length && history[0].role !== "user") history.shift();
       }
+      let turnIdx = history.length - 1;
+      while (turnIdx > 0 && history[turnIdx].role !== "user") turnIdx--;
+      const loreBlock = loreTurn(text, lastUserText);
       const t0 = performance.now();
       let first = true, shown = "", toolsUsed = 0;
       const useTools = () => Config.tools && Native.available && !noTools.has(Config.model);
@@ -855,16 +861,15 @@
             messages: [
               {
                 role: "system",
-                content: SYSTEM_PROMPT
-                  + (Resident.name ? `\n수호자의 이름은 ${Resident.name}이다.` : "")
-                  + "\n\n" + loreContext(text + " " + lastUserText)
+                content: systemPrompt()
               },
               ...FEW_SHOT_TURNS,
-              ...history
+              // 대화 기록은 그대로 두고, 이번 질문에만 고른 세계관 항목을 붙여서 보낸다
+              ...history.map((m, i) => (i === turnIdx && loreBlock) ? { ...m, content: loreBlock + m.content } : m)
             ],
             stream: true,
-            keep_alive: "30m",
-            options: { num_ctx: 8192, temperature: 0.45, top_p: 0.85, repeat_penalty: 1.12 }
+            keep_alive: -1,     // 앱이 켜져 있는 동안 모델을 메모리에 유지 (종료 시 Swift가 내림)
+            options: { num_ctx: 8192, temperature: 0.45, top_p: 0.85, repeat_penalty: 1.12, num_predict: 360 }
           };
           if (useTools()) body.tools = TOOLS;
           if (/qwen3|deepseek-r1|gpt-oss|magistral/i.test(Config.model)) body.think = false;
@@ -951,7 +956,24 @@
     };
   })();
 
-  async function probeLLM() { await Link.probe(); refreshLink(); }
+  function systemPrompt() {
+    return SYSTEM_PROMPT + (Resident.name ? `\n수호자의 이름은 ${Resident.name}이다.` : "") + "\n\n" + LORE_SYSTEM;
+  }
+
+  // ── 2) 워밍업: 앱이 켜지면 모델을 미리 올리고, 고정 지시문 부분을 캐시해 둔다 ──
+  const warmed = new Set();
+  async function warmUp() {
+    if (!Link.ready || warmed.has(Config.model) || State.busy) return;
+    warmed.add(Config.model);
+    const body = {
+      model: Config.model, stream: true, keep_alive: -1,
+      messages: [{ role: "system", content: systemPrompt() }, ...FEW_SHOT_TURNS, { role: "user", content: "(준비)" }],
+      options: { num_ctx: 8192, num_predict: 1 }
+    };
+    if (/qwen3|deepseek-r1|gpt-oss|magistral/i.test(Config.model)) body.think = false;
+    try { await Ollama.chat(Config.base, body, () => {}); } catch (_) { warmed.delete(Config.model); }
+  }
+  async function probeLLM() { await Link.probe(); refreshLink(); warmUp(); }
   setInterval(() => { if (!State.busy) probeLLM(); }, 20000);
 
   // 외부 핸들러 연결용 (기존 API 유지)
@@ -1404,6 +1426,32 @@
     if (m === "ALERT")  return 0.9 + Math.sin(t * 9) * 0.3;
     return 0.6 + Math.sin(t * 1.2) * 0.08;
   }
+  let ringCache = null;
+  function tickRing(R, dpr) {
+    const key = Math.round(R) + "|" + dpr;
+    if (ringCache && ringCache.key === key) return ringCache;
+    const half = Math.ceil(R * 0.72);
+    const off = document.createElement("canvas");
+    off.width = off.height = half * 2 * dpr;
+    const o = off.getContext("2d");
+    o.setTransform(dpr, 0, 0, dpr, half * dpr, half * dpr);
+    for (let i = 0; i < 144; i++) {
+      const a = (i / 144) * Math.PI * 2;
+      const l = i % 12 === 0 ? R * 0.04 : R * 0.02;
+      o.beginPath();
+      o.moveTo(Math.cos(a) * R * 0.69, Math.sin(a) * R * 0.69);
+      o.lineTo(Math.cos(a) * (R * 0.69 - l), Math.sin(a) * (R * 0.69 - l));
+      o.strokeStyle = rgba(accent, i % 12 === 0 ? 0.7 : 0.3); o.lineWidth = 1; o.stroke();
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      o.beginPath(); o.arc(0, 0, R * 0.635, a, a + 0.32);
+      o.strokeStyle = rgba(accent, 0.5); o.lineWidth = R * 0.018; o.stroke();
+    }
+    ringCache = { key, canvas: off, half };
+    return ringCache;
+  }
+
   function drawCore(t, dt) {
     const { w, h, dpr } = fit(core);
     const c = cx2;
@@ -1444,28 +1492,16 @@
 
     // 베젤 위 발광 아크
     c.save(); c.translate(ax1, ay1); c.rotate(spinB);
-    c.shadowColor = rgba(accent, 0.9); c.shadowBlur = 10;
+    c.shadowColor = rgba(accent, 0.9); c.shadowBlur = 7;
     c.strokeStyle = rgba(accent, 0.85); c.lineWidth = 2;
     c.beginPath(); c.arc(0, 0, R * 0.865, -0.3, 1.2); c.stroke();
     c.beginPath(); c.arc(0, 0, R * 0.865, Math.PI - 0.2, Math.PI + 0.7); c.stroke();
     c.restore();
 
-    // 미세 눈금 링 (회전)
+    // 미세 눈금 링 (회전): 크기가 바뀔 때만 새로 그리고, 매 프레임은 회전만
+    const ring = tickRing(R, dpr);
     c.save(); c.translate(ax2, ay2); c.rotate(-spinA * 0.4);
-    for (let i = 0; i < 144; i++) {
-      const a = (i / 144) * Math.PI * 2;
-      const l = i % 12 === 0 ? R * 0.04 : R * 0.02;
-      c.beginPath();
-      c.moveTo(Math.cos(a) * R * 0.69, Math.sin(a) * R * 0.69);
-      c.lineTo(Math.cos(a) * (R * 0.69 - l), Math.sin(a) * (R * 0.69 - l));
-      c.strokeStyle = rgba(accent, i % 12 === 0 ? 0.7 : 0.3); c.lineWidth = 1; c.stroke();
-    }
-    // 블록 세그먼트
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      c.beginPath(); c.arc(0, 0, R * 0.635, a, a + 0.32);
-      c.strokeStyle = rgba(accent, 0.5); c.lineWidth = R * 0.018; c.stroke();
-    }
+    c.drawImage(ring.canvas, -ring.half, -ring.half, ring.half * 2, ring.half * 2);
     c.restore();
 
     // 점선 링
@@ -1478,7 +1514,7 @@
     // 진행 아크 (상태에 따라 속도/길이)
     const prog = m === "THINK" ? 0.55 + Math.sin(t * 3) * 0.25 : 0.72;
     c.save(); c.translate(ax4, ay4); c.rotate(spinA);
-    c.shadowColor = rgba(accent, 1); c.shadowBlur = 8;
+    c.shadowColor = rgba(accent, 1); c.shadowBlur = 6;
     c.strokeStyle = rgba(accent, 0.9); c.lineWidth = R * 0.016; c.lineCap = "round";
     c.beginPath(); c.arc(0, 0, R * 0.565, 0, Math.PI * 2 * prog); c.stroke();
     c.restore();
@@ -1516,7 +1552,7 @@
       fg.addColorStop(0, rgba(accent, Math.min(0.85, 0.55 * gk)));
       fg.addColorStop(0.5, rgba(accent, Math.min(0.6, 0.28 * gk)));
       fg.addColorStop(1, rgba(accent, Math.min(0.8, 0.5 * gk)));
-      c.shadowColor = rgba(accent, 1); c.shadowBlur = 14 + glow * 22;
+      c.shadowColor = rgba(accent, 1); c.shadowBlur = 10 + glow * 15;
       c.fillStyle = fg; c.fill();
       c.shadowBlur = 0;
       c.clip();
@@ -1538,7 +1574,7 @@
       roundedPoly(c, pts, radii);
       c.strokeStyle = rgba(accent.map((v) => Math.min(255, v + 70)), 0.95);
       c.lineWidth = 2;
-      c.shadowColor = rgba(accent, 1); c.shadowBlur = 12;
+      c.shadowColor = rgba(accent, 1); c.shadowBlur = 8;
       c.stroke();
       c.shadowBlur = 0;
     }
@@ -1552,7 +1588,7 @@
     cg.addColorStop(0, rgba(accent, Math.min(1, 0.55 + glow * 0.3))); cg.addColorStop(1, rgba(accent, 0));
     c.fillStyle = cg; c.beginPath(); c.arc(px, py, haloR, 0, Math.PI * 2); c.fill();
     c.save(); c.translate(px, py); c.rotate(Math.PI / 4);
-    c.shadowColor = "#fff"; c.shadowBlur = 10 + glow * 14;
+    c.shadowColor = "#fff"; c.shadowBlur = 8 + glow * 10;
     c.fillStyle = "#ffffff"; c.fillRect(-cs / 2, -cs / 2, cs, cs);
     c.restore();
 
@@ -1578,14 +1614,24 @@
     px2.fillRect(0, h / 2, w, 1);
   }
 
+  // 말하거나 생각할 땐 60fps, 대기 중엔 30fps. 창이 가려지거나 최소화되면 그리기를 멈춘다.
+  let lastDraw = 0, windowVisible = true, looping = false;
   function loop(now) {
+    if (!windowVisible || document.hidden) { looping = false; return; }
+    looping = true;
+    requestAnimationFrame(loop);
+    const active = State.mode === "SPEAK" || State.mode === "THINK" || State.mode === "ALERT" || State.energy > 0.05;
+    if (!active && now - lastDraw < 32) return;
+    lastDraw = now;
     const t = now / 1000;
     const dt = Math.min(0.05, last ? t - last : 0);
     last = t;
     drawCore(t, dt);
     drawPulse(t);
-    requestAnimationFrame(loop);
   }
+  function resumeLoop() { if (!looping && windowVisible && !document.hidden) { last = 0; requestAnimationFrame(loop); } }
+  document.addEventListener("visibilitychange", resumeLoop);
+  window.__setVisible = (v) => { windowVisible = !!v; resumeLoop(); };   // Swift가 창 가림·최소화 시 호출
   /* ==========================================================================
    * 5. 부팅
    * ======================================================================== */
@@ -1597,7 +1643,7 @@
   (async () => {
     await sleep(500);
     const boot = addEntry("ghost", "", "부팅");
-    await Link.probe(); refreshLink();
+    await Link.probe(); refreshLink(); warmUp();
     const OPENING = "어서오세요. 기다리고 있었어요. 오늘은 어떤 여정이 우릴 기다리고 있나요?";
     const msg = Link.ready || Config.mode === "LOCAL"
       ? OPENING

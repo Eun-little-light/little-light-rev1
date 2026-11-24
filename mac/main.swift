@@ -346,6 +346,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         web.loadFileURL(res.appendingPathComponent("index.html"), allowingReadAccessTo: res)
         NSApp.activate(ignoringOtherApps: true)
         scheduleSnapshotIfRequested()
+
+        // 창이 가려지거나 최소화되면 화면 애니메이션을 멈추도록 페이지에 알림 (보일 때 다시 시작)
+        NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            self.js("window.__setVisible", [self.window.occlusionState.contains(.visible)])
+        }
     }
 
     // 문서용 스크린샷: `작은 빛.app/Contents/MacOS/GhostCore --snapshot <파일.png> [--delay 초] [--quit]`
@@ -369,7 +375,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ notification: Notification) { ollama.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        unloadModel()
+        ollama.stop()
+    }
+
+    /// 앱이 켜져 있는 동안 메모리에 붙잡아 둔 모델을 종료할 때 내려 놓는다 (최대 1.5초 대기)
+    func unloadModel() {
+        let model = defaults.string(forKey: "llmModel") ?? "qwen3:8b"
+        guard let url = URL(string: base + "/api/generate"),
+              let body = try? JSONSerialization.data(withJSONObject: ["model": model, "keep_alive": 0]) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        req.timeoutInterval = 1.5
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: req) { _, _, _ in done.signal() }.resume()
+        _ = done.wait(timeout: .now() + 1.5)
+    }
 
     // MARK: JS 콜백
     func js(_ fn: String, _ args: [Any]) {
