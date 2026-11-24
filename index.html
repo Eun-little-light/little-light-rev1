@@ -666,15 +666,10 @@
     "사용자 메시지 끝의 '(지금: ...)'은 현재 시각 정보다. 날짜와 시간 계산에 쓰되 굳이 언급하지는 않는다."
   ].join("\n");
 
-  // 원작 고스트의 3단 호흡(상태 확인 → 분석/농담 → 담백한 마무리)을 고정하는 모범 대화 예시
-  const FEW_SHOT_TURNS = [
-    { role: "user", content: "오늘 기분은 어때?" },
-    { role: "assistant", content: "전송 신호도 깨끗하고, 외피 상태도 양호해요. 무엇보다 수호자가 곁에 있으니 최상의 컨디션이죠. 오늘은 어떤 일부터 처리할까요?" },
-    { role: "user", content: "사파리 열어 줘" },
-    { role: "assistant", content: "잠깐만요, 브라우저 신호부터 잡을게요. …됐어요, 열렸어요." },
-    { role: "user", content: "나 좀 피곤하네" },
-    { role: "assistant", content: "생체 리듬이 많이 떨어져 보이네요. 무리하지 말고 잠깐 눈 좀 붙여요, 수호자. 주변 신호는 제가 계속 살피고 있을게요." }
-  ];
+  // 말투 참고: 완성된 예시 문장(질문→대답)을 주면 같은 질문에 그 대답을 그대로 베낀다.
+  // 그래서 예시 문장 대신 '리듬'을 말로 설명하고, 어미를 보여 주는 짧은 조각만 둔다. (지시문에 고정 포함 → 캐시 유지)
+  const STYLE_NOTES = "\n\n[말투 참고] 답은 보통 세 박자로 간다: ① 지금 상태나 신호를 짧게 짚고, ② 짧은 분석이나 가벼운 걱정·농담 한 마디, ③ 다음에 뭘 할지 담백하게 묻거나 마무리한다. " +
+    "어미 감각만 참고할 조각: '~해 보이네요', '~할게요', '~죠', '…됐어요'. 이 조각이나 예전 대답을 그대로 이어 붙이지 말고, 매번 지금 상황에 맞는 새 문장으로 말한다.";
 
   // ── 세계관 지식 검색: 세계관 질문일 때만 연대표와 관련 항목을 주입한다 ──
   const LoreDB = window.LORE_DB || { core: "", sections: [] };
@@ -863,7 +858,6 @@
                 role: "system",
                 content: systemPrompt()
               },
-              ...FEW_SHOT_TURNS,
               // 대화 기록은 그대로 두고, 이번 질문에만 고른 세계관 항목을 붙여서 보낸다
               ...history.map((m, i) => (i === turnIdx && loreBlock) ? { ...m, content: loreBlock + m.content } : m)
             ],
@@ -957,7 +951,7 @@
   })();
 
   function systemPrompt() {
-    return SYSTEM_PROMPT + (Resident.name ? `\n수호자의 이름은 ${Resident.name}이다.` : "") + "\n\n" + LORE_SYSTEM;
+    return SYSTEM_PROMPT + STYLE_NOTES + (Resident.name ? `\n수호자의 이름은 ${Resident.name}이다.` : "") + "\n\n" + LORE_SYSTEM;
   }
 
   // ── 2) 워밍업: 앱이 켜지면 모델을 미리 올리고, 고정 지시문 부분을 캐시해 둔다 ──
@@ -967,7 +961,7 @@
     warmed.add(Config.model);
     const body = {
       model: Config.model, stream: true, keep_alive: -1,
-      messages: [{ role: "system", content: systemPrompt() }, ...FEW_SHOT_TURNS, { role: "user", content: "(준비)" }],
+      messages: [{ role: "system", content: systemPrompt() }, { role: "user", content: "(준비)" }],
       options: { num_ctx: 8192, num_predict: 1 }
     };
     if (/qwen3|deepseek-r1|gpt-oss|magistral/i.test(Config.model)) body.think = false;
